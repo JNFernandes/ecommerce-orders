@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto';
 import { OrderStatus } from './order-status.enum';
 import { OrderItem } from './order-item.value-object';
 import { OrderPlaced } from './events/order-placed.event';
+import { OrderCancelled } from './events/order-cancelled.event';
 import { OrderValidationError } from './order-validation.error';
+import { OrderCancellationError } from './order-cancellation.error';
 
 export interface RawOrderItem {
   productId: string;
@@ -10,22 +12,24 @@ export interface RawOrderItem {
   unitPrice: number;
 }
 
+export type OrderDomainEvent = OrderPlaced | OrderCancelled;
+
 /**
  * Order is the aggregate root for a customer's purchase request. All business rules
- * for placing an order (consolidation, validation, total calculation) live here and
- * nowhere else — this class has no I/O and no framework dependencies.
+ * for placing, cancelling, etc. an order live here and nowhere else — this class has
+ * no I/O and no framework dependencies.
  */
 export class Order {
-  private readonly domainEvents: OrderPlaced[] = [];
+  private readonly domainEvents: OrderDomainEvent[] = [];
 
   private constructor(
     public readonly id: string,
     public readonly customerId: string,
-    public readonly status: OrderStatus,
+    public status: OrderStatus,
     public readonly items: OrderItem[],
     public readonly totalAmount: number,
     public readonly createdAt: Date,
-    public readonly updatedAt: Date,
+    public updatedAt: Date,
   ) {}
 
   /**
@@ -70,6 +74,23 @@ export class Order {
     return order;
   }
 
+  /**
+   * Cancels a pending order. Only a PENDING order can be cancelled — attempting to
+   * cancel an order that is already CONFIRMED or already CANCELLED raises
+   * OrderCancellationError instead of silently succeeding.
+   */
+  cancel(): void {
+    if (this.status !== OrderStatus.PENDING) {
+      throw new OrderCancellationError(
+        `cannot cancel order with status ${this.status}; only a PENDING order can be cancelled`,
+      );
+    }
+
+    this.status = OrderStatus.CANCELLED;
+    this.updatedAt = new Date();
+    this.domainEvents.push(OrderCancelled.from(this));
+  }
+
   /** Reconstructs an Order from persisted state, without raising domain events. */
   static reconstitute(
     id: string,
@@ -98,7 +119,7 @@ export class Order {
   }
 
   /** Drains and returns the domain events raised by this aggregate. */
-  pullDomainEvents(): OrderPlaced[] {
+  pullDomainEvents(): OrderDomainEvent[] {
     const events = [...this.domainEvents];
     this.domainEvents.length = 0;
     return events;

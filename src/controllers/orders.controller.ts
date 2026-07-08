@@ -1,18 +1,31 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   HttpCode,
-  HttpException,
+  Param,
+  ParseUUIDPipe,
   Post,
 } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
-import { ApiCreatedResponse, ApiNotFoundResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { PlaceOrderCommand } from '../commands/place-order.command';
 import { PlaceOrderResult } from '../services/place-order.service';
+import { CancelOrderCommand } from '../commands/cancel-order.command';
+import { CancelOrderResult } from '../services/cancel-order.service';
 import { OrderValidationError } from '../domain/order-validation.error';
+import { OrderCancellationError } from '../domain/order-cancellation.error';
 import { PlaceOrderDto } from '../dto/place-order.dto';
 import { PlaceOrderResponseDto } from '../dto/place-order-response.dto';
+import { CancelOrderResponseDto } from '../dto/cancel-order-response.dto';
 
 /** REST entry point for the Orders write path. */
 @ApiTags('orders')
@@ -35,8 +48,27 @@ export class OrdersController {
       if (error instanceof OrderValidationError) {
         throw new BadRequestException(error.message);
       }
-      if (error instanceof HttpException) {
-        throw error;
+      throw error;
+    }
+  }
+
+  @Post(':orderId/cancel')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Cancel a pending order' })
+  @ApiOkResponse({ type: CancelOrderResponseDto })
+  @ApiNotFoundResponse({ description: 'Order not found' })
+  @ApiConflictResponse({ description: 'Order is not in a cancellable (PENDING) state' })
+  async cancelOrder(
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+  ): Promise<CancelOrderResponseDto> {
+    try {
+      const result: CancelOrderResult = await this.commandBus.execute(
+        new CancelOrderCommand(orderId),
+      );
+      return { orderId: result.orderId, status: result.status };
+    } catch (error) {
+      if (error instanceof OrderCancellationError) {
+        throw new ConflictException(error.message);
       }
       throw error;
     }

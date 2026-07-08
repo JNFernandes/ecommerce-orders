@@ -2,6 +2,7 @@ import { Logger, NotFoundException } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { CustomerRepository } from '../repositories/customer.repository';
 import { Order } from '../domain/order.aggregate';
+import { OrderPlaced } from '../domain/events/order-placed.event';
 import { OrderRepository } from '../repositories/order.repository';
 import { OrderDeadLetterRepository } from '../repositories/order-dead-letter.repository';
 import { ORDER_PLACED_TOPIC, OrderEventsProducer } from '../infra/kafka/order-events.producer';
@@ -39,7 +40,7 @@ export class PlaceOrderService implements ICommandHandler<PlaceOrderCommand, Pla
     }
 
     const order = Order.place(command.customerId, command.items);
-    const [orderPlacedEvent] = order.pullDomainEvents();
+    const [orderPlacedEvent] = order.pullDomainEvents() as [OrderPlaced];
 
     await this.orderRepository.save(order);
 

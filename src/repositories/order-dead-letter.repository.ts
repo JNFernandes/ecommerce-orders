@@ -3,9 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { OrderDeadLetterEntity } from '../infra/database/entities/order-dead-letter.entity';
-import { OrderPlaced } from '../domain/events/order-placed.event';
 
-/** Persists OrderPlaced events that failed to publish to Kafka, so they can be retried later. */
+interface DomainEventPayload {
+  eventId: string;
+}
+
+/** Persists domain events that failed to publish to Kafka, so they can be retried later. */
 @Injectable()
 export class OrderDeadLetterRepository {
   constructor(
@@ -13,7 +16,7 @@ export class OrderDeadLetterRepository {
     private readonly repository: Repository<OrderDeadLetterEntity>,
   ) {}
 
-  async recordFailure(topic: string, event: OrderPlaced, error: Error): Promise<void> {
+  async recordFailure(topic: string, event: DomainEventPayload, error: Error): Promise<void> {
     const entity = this.repository.create({
       id: randomUUID(),
       eventId: event.eventId,

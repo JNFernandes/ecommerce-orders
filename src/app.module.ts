@@ -13,6 +13,7 @@ import { OrderRepository } from './repositories/order.repository';
 import { OrderDeadLetterRepository } from './repositories/order-dead-letter.repository';
 import { CustomerRepository } from './repositories/customer.repository';
 import { PlaceOrderService } from './services/place-order.service';
+import { CancelOrderService } from './services/cancel-order.service';
 import { OrdersController } from './controllers/orders.controller';
 
 @Module({
@@ -44,6 +45,7 @@ import { OrdersController } from './controllers/orders.controller';
   controllers: [OrdersController],
   providers: [
     PlaceOrderService,
+    CancelOrderService,
     OrderRepository,
     OrderDeadLetterRepository,
     CustomerRepository,
