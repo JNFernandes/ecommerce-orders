@@ -3,8 +3,10 @@ import { OrderStatus } from './order-status.enum';
 import { OrderItem } from './order-item.value-object';
 import { OrderPlaced } from './events/order-placed.event';
 import { OrderCancelled } from './events/order-cancelled.event';
+import { OrderConfirmed } from './events/order-confirmed.event';
 import { OrderValidationError } from './order-validation.error';
 import { OrderCancellationError } from './order-cancellation.error';
+import { OrderConfirmationError } from './order-confirmation.error';
 
 export interface RawOrderItem {
   productId: string;
@@ -12,7 +14,7 @@ export interface RawOrderItem {
   unitPrice: number;
 }
 
-export type OrderDomainEvent = OrderPlaced | OrderCancelled;
+export type OrderDomainEvent = OrderPlaced | OrderCancelled | OrderConfirmed;
 
 /**
  * Order is the aggregate root for a customer's purchase request. All business rules
@@ -89,6 +91,23 @@ export class Order {
     this.status = OrderStatus.CANCELLED;
     this.updatedAt = new Date();
     this.domainEvents.push(OrderCancelled.from(this));
+  }
+
+  /**
+   * Confirms a pending order (e.g. after payment has been processed). Only a PENDING
+   * order can be confirmed — attempting to confirm an order that is already CONFIRMED
+   * or already CANCELLED raises OrderConfirmationError instead of silently succeeding.
+   */
+  confirm(): void {
+    if (this.status !== OrderStatus.PENDING) {
+      throw new OrderConfirmationError(
+        `cannot confirm order with status ${this.status}; only a PENDING order can be confirmed`,
+      );
+    }
+
+    this.status = OrderStatus.CONFIRMED;
+    this.updatedAt = new Date();
+    this.domainEvents.push(OrderConfirmed.from(this));
   }
 
   /** Reconstructs an Order from persisted state, without raising domain events. */

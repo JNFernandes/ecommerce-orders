@@ -10,8 +10,8 @@ at a glance.
 |---|---|---|
 | `controllers/` | Controller | `OrdersController` — HTTP I/O only, no business logic |
 | `commands/` | — | CQRS command objects (e.g. `PlaceOrderCommand`) — plain data, dispatched via `CommandBus` |
-| `services/` | Service | `PlaceOrderService`, `CancelOrderService` — orchestrate a command: call the domain, then the repository, then Kafka. Each registered as a CQRS `@CommandHandler` |
-| `domain/` | Domain | `Order` aggregate (`place()`, `cancel()`), `OrderItem` value object, `OrderPlaced`/`OrderCancelled` events, `OrderValidationError`/`OrderCancellationError` — pure business logic, no I/O, no framework dependency |
+| `services/` | Service | `PlaceOrderService`, `CancelOrderService`, `ConfirmOrderService` — orchestrate a command: call the domain, then the repository, then Kafka. Each registered as a CQRS `@CommandHandler` |
+| `domain/` | Domain | `Order` aggregate (`place()`, `cancel()`, `confirm()`), `OrderItem` value object, `OrderPlaced`/`OrderCancelled`/`OrderConfirmed` events, `OrderValidationError`/`OrderCancellationError`/`OrderConfirmationError` — pure business logic, no I/O, no framework dependency |
 | `dto/` | — | Request/response shapes validated with `class-validator` (`PlaceOrderDto`) and documented with Swagger |
 | `repositories/` | Repository | Thin persistence classes (`OrderRepository`, `CustomerRepository`, `OrderDeadLetterRepository`) — map domain objects to/from TypeORM entities |
 | `infra/database/` | Infrastructure | TypeORM entities (`entities/`), the migration that creates the schema (`migrations/`), a local dev seed script (`seeds/`), and the CLI `DataSource` config |
@@ -37,8 +37,10 @@ repo. See `specs/001-place-order/research.md` for the reasoning.
 |---|---|---|
 | `POST` | `/orders` | Places a new order. See `specs/001-place-order/contracts/rest-place-order.md`. |
 | `POST` | `/orders/:orderId/cancel` | Cancels a `PENDING` order (`404` if not found, `409` if not `PENDING`). See `docs/us-02-cancel-order.md`. |
+| `POST` | `/orders/:orderId/confirm` | Confirms a `PENDING` order, e.g. after payment (`404` if not found, `409` if not `PENDING`). See `docs/us-03-confirm-order.md`. |
 
 | Event | Topic | Produced/Consumed |
 |---|---|---|
 | `OrderPlaced` | `orders.order-placed` | Produced by `OrderEventsProducer` after a successful DB save. No consumer in this repo — see `specs/001-place-order/contracts/event-order-placed.md` and `docs/events/order-placed.md`. |
 | `OrderCancelled` | `orders.order-cancelled` | Produced by `OrderEventsProducer` after a successful status-update save. No consumer in this repo — see `docs/events/order-cancelled.md`. |
+| `OrderConfirmed` | `orders.order-confirmed` | Produced by `OrderEventsProducer` after a successful status-update save. No consumer in this repo — see `docs/events/order-confirmed.md`. |

@@ -2,6 +2,7 @@ import { Order } from '../../../src/domain/order.aggregate';
 import { OrderStatus } from '../../../src/domain/order-status.enum';
 import { OrderPlaced } from '../../../src/domain/events/order-placed.event';
 import { OrderCancelled } from '../../../src/domain/events/order-cancelled.event';
+import { OrderConfirmed } from '../../../src/domain/events/order-confirmed.event';
 
 const CUSTOMER_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
 
@@ -113,5 +114,47 @@ describe('Order.cancel()', () => {
     order.cancel();
 
     expect(() => order.cancel()).toThrow(/only a PENDING order can be cancelled/);
+  });
+});
+
+describe('Order.confirm()', () => {
+  function placeOrder(): Order {
+    return Order.place(CUSTOMER_ID, [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }]);
+  }
+
+  it('should transition a PENDING order to CONFIRMED', () => {
+    const order = placeOrder();
+
+    order.confirm();
+
+    expect(order.status).toBe(OrderStatus.CONFIRMED);
+  });
+
+  it('should raise an OrderConfirmed domain event', () => {
+    const order = placeOrder();
+    order.pullDomainEvents(); // drain the OrderPlaced event raised by place()
+
+    order.confirm();
+
+    const events = order.pullDomainEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toBeInstanceOf(OrderConfirmed);
+    const event = events[0] as OrderConfirmed;
+    expect(event.aggregateId).toBe(order.id);
+    expect(event.customerId).toBe(CUSTOMER_ID);
+  });
+
+  it('should throw OrderConfirmationError when the order is already CONFIRMED', () => {
+    const order = placeOrder();
+    order.confirm();
+
+    expect(() => order.confirm()).toThrow(/only a PENDING order can be confirmed/);
+  });
+
+  it('should throw OrderConfirmationError when the order is already CANCELLED', () => {
+    const order = placeOrder();
+    order.cancel();
+
+    expect(() => order.confirm()).toThrow(/only a PENDING order can be confirmed/);
   });
 });
