@@ -25,7 +25,15 @@
 - Each item must have `productId` (non-empty string), `quantity` (integer > 0), `unitPrice` (number > 0)
 - Returns `HTTP 400 Bad Request` with validation errors if any rule is violated
 
+### AC-02a — Customer existence validation
+- `customerId` MUST correspond to an existing, known customer
+- This check runs after DTO validation (AC-02) and before the domain `Order.place()` call and before any DB save
+- If no customer exists for the given `customerId`, return `HTTP 404 Not Found` with an error indicating the customer was not found
+- No order is created and no Kafka event is published when this check fails
+- Implemented via a customer lookup (e.g., `CustomerRepository`/`CustomerLookupService`) called from `PlaceOrderService` — the domain layer stays free of this I/O-bound check per the constitution's pure-domain rule; the exact lookup mechanism (local reference table vs. call to a customers service) is to be finalized during planning
+
 ### AC-03 — Write flow integrity
+- The customer existence check (AC-02a) MUST pass before PostgreSQL save is attempted
 - PostgreSQL save MUST succeed before Kafka publish is attempted
 - If DB save fails → return `HTTP 500`, no Kafka message emitted
 - If Kafka publish fails after successful DB save → return `HTTP 201` (save succeeded), log error, store failed event in dead-letter table for retry
@@ -90,6 +98,15 @@ Content-Type: application/json
 }
 ```
 
+### Response — 404 Not Found
+```json
+{
+  "statusCode": 404,
+  "message": "Customer not found",
+  "error": "Not Found"
+}
+```
+
 ---
 
 ## Domain Model
@@ -124,11 +141,17 @@ CANCELLED
 ```
 Order.place(customerId, items) → Order
   - validates items are not empty
-  - validates each item quantity > 0 and unitPrice > 0
-  - calculates totalAmount
+  - consolidates items referencing the same productId into a single OrderItem
+    with the summed quantity (no duplicate line items for the same product)
+  - validates each (consolidated) item quantity > 0 and unitPrice > 0
+  - calculates totalAmount from the consolidated items
   - sets status to PENDING
   - raises OrderPlaced domain event
 ```
+
+Note: `customerId` existence is verified by `PlaceOrderService` (see AC-02a) before `Order.place()` is
+called — this is an I/O-bound check and stays out of the domain layer per the constitution's
+pure-domain rule.
 
 ---
 
@@ -138,32 +161,31 @@ Order.place(customerId, items) → Order
 POST /orders
     │
     ▼
-OrdersController          presentation/rest/
-    │  PlaceOrderDto
+OrdersController          src/controllers/
+    │  PlaceOrderDto      src/dto/
     ▼
-PlaceOrderCommand         application/commands/place-order/
+PlaceOrderCommand         src/commands/
     │
     ▼
-PlaceOrderHandler         application/commands/place-order/
+PlaceOrderService         src/services/
+    │  verifies customerId exists (CustomerRepository)
     │  calls Order.place()
     ▼
-Order (domain)            domain/
+Order (domain)            src/domain/
     │  raises OrderPlaced domain event
     ▼
-OrderRepository           infrastructure/persistence/
-    │  saves to write DB (PostgreSQL)
+OrderRepository           src/repositories/
+    │  saves to write DB (PostgreSQL)  — entities in src/infra/database/entities/
     ▼
-OrderEventsProducer       infrastructure/kafka/
+OrderEventsProducer       src/infra/kafka/
     │  publishes to orders.order-placed
     ▼
 Kafka
-    │
-    ▼
-OrderProjection           infrastructure/projections/
-    │  consumes OrderPlaced
-    ▼
-Read DB (PostgreSQL)      updates read model
 ```
+
+The codebase is organized by technical layer first (`controllers/`, `services/`, `domain/`, `repositories/`, `infra/`), not by bounded context — file names carry the entity/feature name instead (e.g. `orders.controller.ts`, `place-order.service.ts`). There is a single `AppModule` (no per-feature NestJS modules), since this repo currently has only one bounded context (orders).
+
+This service is a Kafka **producer only** — there is no consumer, and no read model, in this repo. A denormalized read view of orders (for a future query/GraphQL feature) is intentionally deferred to a separate future service that will consume `orders.order-placed` and own its own database. See `specs/001-place-order/research.md` for the reasoning.
 
 ---
 
@@ -179,10 +201,12 @@ Read DB (PostgreSQL)      updates read model
 | UT-04 | `Order.place()` throws if items array is empty |
 | UT-05 | `Order.place()` throws if quantity <= 0 |
 | UT-06 | `Order.place()` throws if unitPrice <= 0 |
-| UT-07 | `PlaceOrderHandler` saves to DB before publishing to Kafka |
-| UT-08 | `PlaceOrderHandler` does NOT publish to Kafka if DB save fails |
-| UT-09 | `PlaceOrderHandler` returns orderId after successful save |
-| UT-10 | `PlaceOrderHandler` stores event in dead-letter table if Kafka fails |
+| UT-07 | `PlaceOrderService` saves to DB before publishing to Kafka |
+| UT-08 | `PlaceOrderService` does NOT publish to Kafka if DB save fails |
+| UT-09 | `PlaceOrderService` returns orderId after successful save |
+| UT-10 | `PlaceOrderService` stores event in dead-letter table if Kafka fails |
+| UT-11 | `Order.place()` consolidates items with the same `productId` into a single line item with summed quantity |
+| UT-12 | `PlaceOrderService` rejects the request and does not call `Order.place()` when `customerId` does not correspond to an existing customer |
 
 ### Integration tests
 
@@ -194,6 +218,8 @@ Read DB (PostgreSQL)      updates read model
 | IT-04 | `POST /orders` with invalid unitPrice returns 400 |
 | IT-05 | `POST /orders` with empty items array returns 400 |
 | IT-06 | `POST /orders` saves order correctly to write database |
+| IT-07 | `POST /orders` with a `customerId` that does not correspond to an existing customer returns 404, no order created |
+| IT-08 | `POST /orders` with duplicate `productId` entries in `items` creates one consolidated line item with the summed quantity |
 
 ### Component tests
 
@@ -201,7 +227,10 @@ Read DB (PostgreSQL)      updates read model
 |------|-------------|
 | CT-01 | Full write flow: POST /orders → DB saved → OrderPlaced emitted to Kafka |
 | CT-02 | Kafka publish failure does not return 500 to client |
-| CT-03 | Order appears in read model after projection processes OrderPlaced |
+| CT-04 | Unknown `customerId` is rejected before DB save and before Kafka publish (neither occurs) |
+
+Note: there is no read-model/projection test in this repo — this service is a Kafka producer
+only. A future, separate read-side service will own that responsibility and its own tests.
 
 ### Test naming convention
 ```
@@ -222,7 +251,6 @@ Examples:
 - Order confirmation (US-03)
 - Order cancellation (US-02)
 - Authentication / authorisation
-- Customer validation (customer existence not checked in this service)
 
 ---
 
@@ -240,15 +268,16 @@ Created from `main` before any implementation begins.
 
 - [ ] Branch `feature/US-01-place-order` created from main
 - [ ] `Order` aggregate with `place()` method implemented
-- [ ] `PlaceOrderCommand` and `PlaceOrderHandler` implemented
+- [ ] `PlaceOrderCommand` and `PlaceOrderService` implemented
 - [ ] `OrdersController` POST /orders endpoint implemented
 - [ ] `PlaceOrderDto` with validation decorators implemented
 - [ ] `OrderRepository` saves to write DB
-- [ ] `OrderEventsProducer` publishes to Kafka after DB save
-- [ ] `OrderProjection` updates read model
-- [ ] All unit tests passing (UT-01 to UT-10)
-- [ ] All integration tests passing (IT-01 to IT-06)
-- [ ] All component tests passing (CT-01 to CT-03)
+- [ ] `OrderEventsProducer` publishes to Kafka after DB save (producer only — no consumer/read model in this repo)
+- [ ] Customer existence check (`CustomerRepository`/`CustomerLookupService`) implemented in `PlaceOrderService`, before DB save
+- [ ] `Order.place()` consolidates duplicate `productId` entries into a single line item
+- [ ] All unit tests passing (UT-01 to UT-12)
+- [ ] All integration tests passing (IT-01 to IT-08)
+- [ ] All component tests passing (CT-01, CT-02, CT-04)
 - [ ] `npm run build` passes
 - [ ] `npm run lint` passes with zero errors
 - [ ] `npm run format:check` passes
