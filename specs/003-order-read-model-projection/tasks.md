@@ -236,23 +236,23 @@ schema and module, and message parsing.
 
 ### Tests (write first)
 
-- [ ] T032 [P] [US4] Unit tests in `tests/unit/infra/order-projection.consumer.spec.ts` (mocked kafkajs `Consumer`, `OrderProjectionService`, dead-letter repository, and config with `maxAttempts: 3`, backoff 1/2 ms):
+- [X] T032 [P] [US4] Unit tests in `tests/unit/infra/order-projection.consumer.spec.ts` (mocked kafkajs `Consumer`, `OrderProjectionService`, dead-letter repository, and config with `maxAttempts: 3`, backoff 1/2 ms):
   - valid → `project` then `commitOffsets(offset + 1)`;
   - `not json` → `recordMalformed` with attempts 1, then commit, with no `project` call;
   - `project` throws `OrderViewConcurrencyError` once then succeeds → commit, no dead letter;
   - `project` always throws `Error('boom')` → `recordRetriesExhausted` (attempts 3), then commit;
   - `project` always throws `ReadModelUnavailableError` → `handleMessage` rejects, with **no** dead letter and **no** commit;
   - the group id comes from `projectionGroupId`, not `groupId`.
-- [ ] T033 [P] [US4] Extend `tests/integration/order-view.repository.integration.spec.ts` with an **outage mapping** case: build a repository against a stopped `MongoDBContainer` (or an unreachable URI with `serverSelectionTimeoutMS: 500`); `findById` and `insert` reject with `ReadModelUnavailableError`.
-- [ ] T034 [US4] Extend `tests/component/order-projection.component.spec.ts`:
+- [X] T033 [P] [US4] Extend `tests/integration/order-view.repository.integration.spec.ts` with an **outage mapping** case: build a repository against a stopped `MongoDBContainer` (or an unreachable URI with `serverSelectionTimeoutMS: 500`); `findById` and `insert` reject with `ReadModelUnavailableError`.
+- [X] T034 [US4] Extend `tests/component/order-projection.component.spec.ts`:
   - produce `not json` to `orders.order-placed`, then place a real order;
   - assert one `consumed_message_dead_letters` row with `failureType = 'MALFORMED'` and `topic = 'orders.order-placed'`;
   - assert the real order's view appears.
 
 ### Implementation
 
-- [ ] T035 [US4] In `src/read-model/order-view.repository.ts`, wrap every Mongo call. Translate connectivity failures into `ReadModelUnavailableError(cause)`: `MongoServerSelectionError`, `MongoNetworkError`, `MongoNotConnectedError`, and Mongoose's "buffering"/"not connected" errors (check `error.name` against a constant list, with no `any`). Pass other errors through. Makes T033 pass.
-- [ ] T036 [US4] In `src/infra/kafka/order-projection.consumer.ts`, pass `isFatal: (e) => e instanceof ReadModelUnavailableError` to `consumeWithDeadLetter`, and log the outage at error level with topic, partition and offset. Makes T032 and T034 pass.
+- [X] T035 [US4] In `src/read-model/order-view.repository.ts`, wrap every Mongo call. Translate connectivity failures into `ReadModelUnavailableError(cause)`: `MongoServerSelectionError`, `MongoNetworkError`, `MongoNotConnectedError`, and Mongoose's "buffering"/"not connected" errors (check `error.name` against a constant list, with no `any`). Pass other errors through. Makes T033 pass.
+- [X] T036 [US4] In `src/infra/kafka/order-projection.consumer.ts`, pass `isFatal: (e) => e instanceof ReadModelUnavailableError` to `consumeWithDeadLetter`, and log the outage at error level with topic, partition and offset. Makes T032 and T034 pass.
 
 **Checkpoint**: all four stories work, and US-04 is unchanged.
 

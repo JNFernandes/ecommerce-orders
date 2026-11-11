@@ -6,7 +6,7 @@ import { OrderViewRepository } from '../../src/read-model/order-view.repository'
 import { buildReadModelTestingModule, mongoUri } from './support/read-model-testing';
 import { OrderView } from '../../src/read-model/order-view';
 import { OrderViewStatus } from '../../src/read-model/order-view-status.enum';
-import { OrderViewConcurrencyError } from '../../src/read-model/errors';
+import { OrderViewConcurrencyError, ReadModelUnavailableError } from '../../src/read-model/errors';
 
 jest.setTimeout(180_000);
 
@@ -151,5 +151,37 @@ describe('OrderViewRepository (integration, MongoDB)', () => {
 
   it('should return null for an unknown order id', async () => {
     expect(await repository.findById(nextOrderId())).toBeNull();
+  });
+});
+
+describe('OrderViewRepository (integration, MongoDB unavailable)', () => {
+  it('should report ReadModelUnavailableError when MongoDB goes away after connecting', async () => {
+    const container = await new MongoDBContainer('mongo:7').start();
+    const moduleRef = await buildReadModelTestingModule(mongoUri(container.getConnectionString()));
+    const repository = moduleRef.get(OrderViewRepository);
+    await repository.insert(view('00000000-0000-4000-8000-0000000000aa'));
+
+    await container.stop();
+
+    await expect(repository.findById('00000000-0000-4000-8000-0000000000aa')).rejects.toThrow(
+      ReadModelUnavailableError,
+    );
+    await expect(repository.insert(view('00000000-0000-4000-8000-0000000000bb'))).rejects.toThrow(
+      ReadModelUnavailableError,
+    );
+    await moduleRef.close().catch(() => undefined);
+  });
+
+  it('should report ReadModelUnavailableError when the initial connection never succeeded', async () => {
+    const moduleRef = await buildReadModelTestingModule('mongodb://localhost:27997/unreachable', {
+      lazy: true,
+    });
+    const repository = moduleRef.get(OrderViewRepository);
+    const orderId = '00000000-0000-4000-8000-0000000000cc';
+
+    await expect(repository.findById(orderId)).rejects.toThrow(ReadModelUnavailableError);
+    await expect(repository.insert(view(orderId))).rejects.toThrow(ReadModelUnavailableError);
+    await expect(repository.replace(view(orderId), 1)).rejects.toThrow(ReadModelUnavailableError);
+    await moduleRef.close().catch(() => undefined);
   });
 });

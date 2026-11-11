@@ -10,6 +10,7 @@ import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
 import { KafkaConfig } from '../../config/configuration';
 import { OrderEvent } from '../../read-model/order-event';
 import { OrderProjectionService } from '../../read-model/order-projection.service';
+import { ReadModelUnavailableError } from '../../read-model/errors';
 import { ConsumedMessageDeadLetterRepository } from '../../repositories/consumed-message-dead-letter.repository';
 import { KAFKA_CLIENT } from './kafka.constants';
 import { consumeWithDeadLetter } from './consume-with-dead-letter';
@@ -73,12 +74,19 @@ export class OrderProjectionConsumer implements OnApplicationBootstrap, OnApplic
     );
   }
 
-  /** Parses one order event, projects it (with retries), and commits `offset + 1`. */
+  /**
+   * Parses one order event, projects it (with retries), and commits `offset + 1`. Malformed
+   * events and persistent failures are dead-lettered; a read-model outage is rethrown without
+   * committing, so the event is redelivered once MongoDB is back.
+   */
   async handleMessage(payload: EachMessagePayload): Promise<void> {
     await consumeWithDeadLetter<OrderEvent>(payload, {
       parse: parseOrderEventMessage,
       describe: (event) => ({ eventId: event.eventId, orderId: event.orderId }),
       handle: (event) => this.projectionService.project(event),
+      // A MongoDB outage is not the event's fault: never dead-letter it. The offset stays
+      // uncommitted, kafkajs restarts the consumer and the event is redelivered later.
+      isFatal: (error) => error instanceof ReadModelUnavailableError,
       deadLetters: this.deadLetters,
       retry: {
         maxAttempts: this.config.maxAttempts,

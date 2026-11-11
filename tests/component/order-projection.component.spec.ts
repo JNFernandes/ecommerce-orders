@@ -255,4 +255,22 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
 
     expect(await view(orderId)).toEqual(backfilled);
   });
+
+  it('should dead-letter a malformed order event and keep projecting the next orders', async () => {
+    const marker = `not json ${randomUUID()}`;
+    await testProducer.send({ topic: ORDER_PLACED_TOPIC, messages: [{ value: marker }] });
+
+    const orderId = await placeOrder();
+
+    await viewWithStatus(orderId, 'PENDING');
+    const rows = await waitFor(async () => {
+      const found = await dataSource.query(
+        'SELECT topic, "failureType", attempts FROM consumed_message_dead_letters WHERE "rawValue" = $1',
+        [marker],
+      );
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(rows).toEqual([{ topic: ORDER_PLACED_TOPIC, failureType: 'MALFORMED', attempts: 1 }]);
+  });
 });
