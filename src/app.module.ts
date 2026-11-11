@@ -9,6 +9,8 @@ import { OrderEntity } from './infra/database/entities/order.entity';
 import { OrderItemEntity } from './infra/database/entities/order-item.entity';
 import { OrderDeadLetterEntity } from './infra/database/entities/order-dead-letter.entity';
 import { CustomerEntity } from './infra/database/entities/customer.entity';
+import { ProcessedEventEntity } from './infra/database/entities/processed-event.entity';
+import { ConsumedMessageDeadLetterEntity } from './infra/database/entities/consumed-message-dead-letter.entity';
 import { OrderRepository } from './repositories/order.repository';
 import { OrderDeadLetterRepository } from './repositories/order-dead-letter.repository';
 import { CustomerRepository } from './repositories/customer.repository';
@@ -39,7 +41,14 @@ import { OrdersController } from './controllers/orders.controller';
         };
       },
     }),
-    TypeOrmModule.forFeature([OrderEntity, OrderItemEntity, OrderDeadLetterEntity, CustomerEntity]),
+    TypeOrmModule.forFeature([
+      OrderEntity,
+      OrderItemEntity,
+      OrderDeadLetterEntity,
+      CustomerEntity,
+      ProcessedEventEntity,
+      ConsumedMessageDeadLetterEntity,
+    ]),
     CqrsModule.forRoot(),
     KafkaModule,
   ],
