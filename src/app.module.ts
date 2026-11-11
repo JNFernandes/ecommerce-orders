@@ -18,6 +18,8 @@ import { ProcessedEventRepository } from './repositories/processed-event.reposit
 import { PlaceOrderService } from './services/place-order.service';
 import { CancelOrderService } from './services/cancel-order.service';
 import { ConfirmOrderService } from './services/confirm-order.service';
+import { ReactToPaymentOutcomeService } from './services/react-to-payment-outcome.service';
+import { PaymentEventsConsumer } from './infra/kafka/payment-events.consumer';
 import { OrdersController } from './controllers/orders.controller';
 
 @Module({
@@ -58,11 +60,13 @@ import { OrdersController } from './controllers/orders.controller';
     PlaceOrderService,
     CancelOrderService,
     ConfirmOrderService,
+    ReactToPaymentOutcomeService,
     OrderRepository,
     OrderDeadLetterRepository,
     CustomerRepository,
     ProcessedEventRepository,
     OrderEventsProducer,
+    PaymentEventsConsumer,
   ],
 })
 export class AppModule {}

@@ -6,6 +6,7 @@ import { OrderRepository } from '../repositories/order.repository';
 import { OrderDeadLetterRepository } from '../repositories/order-dead-letter.repository';
 import { ORDER_CONFIRMED_TOPIC, OrderEventsProducer } from '../infra/kafka/order-events.producer';
 import { ConfirmOrderCommand } from '../commands/confirm-order.command';
+import { ProcessedEventOutcome } from '../infra/database/entities/processed-event.entity';
 
 export interface ConfirmOrderResult {
   orderId: string;
@@ -42,7 +43,15 @@ export class ConfirmOrderService implements ICommandHandler<
     order.confirm();
     const [orderConfirmedEvent] = order.pullDomainEvents() as [OrderConfirmed];
 
-    await this.orderRepository.updateStatus(order.id, order.status, order.updatedAt);
+    if (command.inboundEvent) {
+      await this.orderRepository.applyInboundStatusChange(
+        order,
+        command.inboundEvent,
+        ProcessedEventOutcome.CONFIRMED,
+      );
+    } else {
+      await this.orderRepository.updateStatus(order.id, order.status, order.updatedAt);
+    }
 
     try {
       await this.orderEventsProducer.publishOrderConfirmed(orderConfirmedEvent);
