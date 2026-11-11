@@ -14,6 +14,7 @@ import { ConsumedMessageDeadLetterEntity } from './infra/database/entities/consu
 import { OrderRepository } from './repositories/order.repository';
 import { OrderDeadLetterRepository } from './repositories/order-dead-letter.repository';
 import { CustomerRepository } from './repositories/customer.repository';
+import { ProcessedEventRepository } from './repositories/processed-event.repository';
 import { PlaceOrderService } from './services/place-order.service';
 import { CancelOrderService } from './services/cancel-order.service';
 import { ConfirmOrderService } from './services/confirm-order.service';
@@ -60,6 +61,7 @@ import { OrdersController } from './controllers/orders.controller';
     OrderRepository,
     OrderDeadLetterRepository,
     CustomerRepository,
+    ProcessedEventRepository,
     OrderEventsProducer,
   ],
 })
