@@ -111,4 +111,42 @@ describe('OrderProjectionService (integration, MongoDB)', () => {
       });
     },
   );
+
+  describe('replay and rebuild', () => {
+    const orders = [
+      { id: 'c1000000-0000-4000-8000-000000000000', seed: 11, outcome: 'confirm' as const },
+      { id: 'c2000000-0000-4000-8000-000000000000', seed: 12, outcome: 'cancel' as const },
+      { id: 'c3000000-0000-4000-8000-000000000000', seed: 13, outcome: 'confirm' as const },
+    ];
+    const history = orders.flatMap((o) => eventsFor(o.id, o.seed, o.outcome));
+
+    async function snapshot(): Promise<Array<StoredDocument | null>> {
+      return Promise.all(orders.map((o) => stored(o.id)));
+    }
+
+    it('should change nothing when every event is replayed over the existing views', async () => {
+      await projectAll(history);
+      const before = await snapshot();
+
+      const outcomes: string[] = [];
+      for (const event of history) {
+        outcomes.push(await service.project(event));
+      }
+
+      expect(outcomes.every((o) => o === 'duplicate')).toBe(true);
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it('should rebuild identical documents after the collection is dropped and replayed in another order', async () => {
+      const before = await snapshot();
+      expect(before.every((d) => d !== null)).toBe(true);
+
+      await connection
+        .collection('order_views')
+        .deleteMany({ _id: { $in: orders.map((o) => o.id) } as never });
+      await projectAll([...history].reverse());
+
+      expect(await snapshot()).toEqual(before);
+    });
+  });
 });

@@ -114,3 +114,15 @@ describe('OrderProjectionService', () => {
     await expect(service.project(PLACED)).rejects.toThrow(OrderViewConcurrencyError);
   });
 });
+
+describe('OrderProjectionService — duplicates', () => {
+  it('should not write anything and report a duplicate when the event was already applied', async () => {
+    const { service, repository } = buildService({ view: pendingView(), revision: 1 });
+
+    const outcome = await service.project(PLACED);
+
+    expect(outcome).toBe('duplicate');
+    expect(repository.insert).not.toHaveBeenCalled();
+    expect(repository.replace).not.toHaveBeenCalled();
+  });
+});

@@ -225,4 +225,34 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
     expect(confirmed.appliedEventIds).toHaveLength(2);
     expect(confirmed.totalAmount).toBe(64.97);
   });
+
+  it('should backfill an order whose OrderPlaced was already in Kafka, and ignore it when redelivered', async () => {
+    const orderId = randomUUID();
+    const message = JSON.stringify({
+      eventId: randomUUID(),
+      occurredAt: '2026-11-01T09:00:00.000Z',
+      aggregateId: orderId,
+      version: 1,
+      customerId: EXISTING_CUSTOMER_ID,
+      items: [{ productId: 'legacy-1', quantity: 2, unitPrice: 12.5 }],
+      totalAmount: 25,
+    });
+
+    await testProducer.send({
+      topic: ORDER_PLACED_TOPIC,
+      messages: [{ key: orderId, value: message }],
+    });
+
+    const backfilled = await viewWithStatus(orderId, 'PENDING');
+    expect(backfilled.totalAmount).toBe(25);
+    expect(backfilled.placedAt).toEqual(new Date('2026-11-01T09:00:00.000Z'));
+
+    await testProducer.send({
+      topic: ORDER_PLACED_TOPIC,
+      messages: [{ key: orderId, value: message }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+    expect(await view(orderId)).toEqual(backfilled);
+  });
 });

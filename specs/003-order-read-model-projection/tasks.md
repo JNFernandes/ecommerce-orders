@@ -210,19 +210,19 @@ schema and module, and message parsing.
 
 ### Tests (write first)
 
-- [ ] T027 [P] [US3] Extend `tests/unit/read-model/order-view.projector.spec.ts`. Re-applying any already-applied event (placed, confirmed, cancelled, and the losing terminal in a conflict) returns `{ kind: 'unchanged' }`.
-- [ ] T028 [P] [US3] Extend `tests/unit/read-model/order-projection.service.spec.ts`. An `unchanged` projection performs **no** repository write and returns `'duplicate'`.
-- [ ] T029 [US3] Extend `tests/integration/order-projection.integration.spec.ts`:
+- [X] T027 [P] [US3] Extend `tests/unit/read-model/order-view.projector.spec.ts`. Re-applying any already-applied event (placed, confirmed, cancelled, and the losing terminal in a conflict) returns `{ kind: 'unchanged' }`.
+- [X] T028 [P] [US3] Extend `tests/unit/read-model/order-projection.service.spec.ts`. An `unchanged` projection performs **no** repository write and returns `'duplicate'`.
+- [X] T029 [US3] Extend `tests/integration/order-projection.integration.spec.ts`:
   - **replay over existing**: re-project all events of 3 orders → every call returns `'duplicate'` and the documents are deep-equal to the snapshot;
   - **rebuild**: `deleteMany({})`, then re-project the same events in a different order → deep-equal to the snapshot, including `updatedAt`, `appliedEventIds` and `revision`.
-- [ ] T030 [US3] Extend `tests/component/order-projection.component.spec.ts` with a **backfill** case:
+- [X] T030 [US3] Extend `tests/component/order-projection.component.spec.ts` with a **backfill** case:
   - before starting the app module, produce a valid `orders.order-placed` message directly to Kafka (simulating an order placed before this story);
   - after init, poll until its view exists as `PENDING`;
   - produce the **same** message again and wait 2s → the document is unchanged (deep-equal).
 
 ### Implementation
 
-- [ ] T031 [US3] In `src/read-model/order-view.projector.ts`, add the dedupe guard as the first rule: if `current?.appliedEventIds.includes(event.eventId)`, return `{ kind: 'unchanged' }`. In `src/read-model/order-projection.service.ts`, skip the write on `unchanged` and return `'duplicate'`, with a debug log. Makes T027–T030 pass.
+- [X] T031 [US3] In `src/read-model/order-view.projector.ts`, add the dedupe guard as the first rule: if `current?.appliedEventIds.includes(event.eventId)`, return `{ kind: 'unchanged' }`. In `src/read-model/order-projection.service.ts`, skip the write on `unchanged` and return `'duplicate'`, with a debug log. Makes T027–T030 pass.
 
 **Checkpoint**: replay and rebuild are safe (FR-015, SC-002).
 

@@ -26,6 +26,7 @@ export class OrderProjectionService {
     const result = projectOrderEvent(stored?.view ?? null, event);
 
     if (result.kind === 'unchanged') {
+      this.logger.debug(`order ${event.orderId}: event ${event.eventId} already applied, skipping`);
       return 'duplicate';
     }
     for (const warning of result.warnings) {

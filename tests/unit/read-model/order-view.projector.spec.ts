@@ -285,3 +285,24 @@ describe('projectOrderEvent — late and out-of-order events', () => {
     });
   });
 });
+
+describe('projectOrderEvent — duplicates', () => {
+  it.each([
+    ['OrderPlaced', [placed()], placed()],
+    ['OrderConfirmed', [placed(), confirmed()], confirmed()],
+    ['OrderCancelled', [placed(), cancelled()], cancelled()],
+    [
+      'the losing terminal of a conflict',
+      [placed(), confirmed({ occurredAt: T1 }), cancelled({ occurredAt: T2 })],
+      cancelled({ occurredAt: T2 }),
+    ],
+  ])('should return unchanged when %s is applied again', (_label, history, again) => {
+    expect(projectOrderEvent(fold(history), again)).toEqual({ kind: 'unchanged' });
+  });
+
+  it('should produce the same view when a whole history is folded twice', () => {
+    const history = [placed(), confirmed()];
+
+    expect(fold([...history, ...history])).toEqual(fold(history));
+  });
+});
