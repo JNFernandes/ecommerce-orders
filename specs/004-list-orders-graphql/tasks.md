@@ -213,22 +213,22 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T033 [P] Update `README.md`:
+- [X] T033 [P] Update `README.md`:
   - the read path becomes **built** (GraphQL `orders` query), with the endpoint `/graphql` and the sandbox note;
   - add an "Example GraphQL queries" section from `contracts/graphql-orders-query.md` (unfiltered, by status, by customer with paging, an error example);
   - the tests section mentions GraphQL integration tests;
   - link `docs/schema.gql`.
-- [ ] T034 [P] Update `CLAUDE.md`:
+- [X] T034 [P] Update `CLAUDE.md`:
   - the read path becomes GraphQL → `QueryBus` → `@QueryHandler` → `OrderViewRepository` (built);
   - add the rule that resolvers live in `src/controllers/`, GraphQL types in `src/dto/graphql/` (built from `OrderView`), and queries in `src/queries/`;
   - every GraphQL type and field needs a description;
   - run `npm run schema:generate` after schema changes (the drift test enforces it).
-- [ ] T035 [P] Update `src/README.md`:
+- [X] T035 [P] Update `src/README.md`:
   - add rows for `queries/`, `dto/graphql/` and `graphql/`;
   - mention `OrdersResolver` in the controllers row;
   - add a "Where a GraphQL query goes" flow line.
-- [ ] T036 [P] Update `docs/read-model.md`: "Nothing reads it yet" becomes "Read by the GraphQL `orders` query (US-06)". Add the indexes table, and note that indexes are created on connect (`autoIndex` off).
-- [ ] T037 Run the full quality gate and `npm run test:cov`. Confirm all thresholds, including the new `src/controllers/**/*.resolver.ts` and `src/graphql/**` entries, and that `npm run schema:generate && git diff --exit-code docs/schema.gql` is clean.
+- [X] T036 [P] Update `docs/read-model.md`: "Nothing reads it yet" becomes "Read by the GraphQL `orders` query (US-06)". Add the indexes table, and note that indexes are created on connect (`autoIndex` off).
+- [X] T037 Run the full quality gate and `npm run test:cov`. Confirm all thresholds, including the new `src/controllers/**/*.resolver.ts` and `src/graphql/**` entries, and that `npm run schema:generate && git diff --exit-code docs/schema.gql` is clean.
 - [ ] T038 Validate live with `specs/004-list-orders-graphql/quickstart.md` §2 against ecommerce-infra (and Payments, if running):
   - the sandbox loads;
   - existing orders are listed, and `totalCount` equals `db.order_views.countDocuments()`;

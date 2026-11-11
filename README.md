@@ -32,9 +32,10 @@ See [`src/README.md`](src/README.md) for the folder layout.
   reaches `CONFIRMED` or `CANCELLED` with no manual call.
 - **Read model (built, US-05)**: a projection consumes this service's own `orders.*` events and
   keeps one MongoDB document per order in `order_views` (see [docs/read-model.md](docs/read-model.md)).
-- **Read path (planned, US-06/07)**: GraphQL → query bus → query handlers → that **MongoDB** read model, kept
-  up to date by a projection that consumes this service's own Kafka events. It is eventually
-  consistent with the write side. See [ADR 0001](docs/adr/0001-cqrs-read-model-in-orders-service.md).
+- **Read path (built, US-06)**: GraphQL `orders` query → query bus → `ListOrdersService` →
+  that **MongoDB** read model. It never touches PostgreSQL and is eventually consistent with the
+  write side. See [GraphQL](#graphql-read-path) and
+  [ADR 0001](docs/adr/0001-cqrs-read-model-in-orders-service.md). Order-by-id is planned (US-07).
 
 ### Events
 
@@ -76,6 +77,71 @@ Swagger UI is served at `http://localhost:3000/api` while the app is running. St
 are in [`docs/us-01-place-order.md`](docs/us-01-place-order.md),
 [`docs/us-02-cancel-order.md`](docs/us-02-cancel-order.md) and
 [`docs/us-03-confirm-order.md`](docs/us-03-confirm-order.md).
+
+## GraphQL (read path)
+
+`POST /graphql` serves the `orders` query from the MongoDB read model (eventually consistent:
+a just-placed order may take a moment to appear). Outside production, open
+`http://localhost:3000/graphql` in a browser for the Apollo Sandbox; with `NODE_ENV=production`
+introspection and the sandbox are off. The schema is committed in
+[`docs/schema.gql`](docs/schema.gql).
+
+`orders(status, customerId, limit = 20, offset = 0): OrdersPage!` returns orders newest first
+(`limit` 1–100, `offset` ≥ 0; `status` and `customerId` are optional and combine with AND), plus
+`totalCount` and `hasNextPage`.
+
+### Example GraphQL queries
+
+Newest orders:
+
+```graphql
+{
+  orders(limit: 5) {
+    totalCount
+    hasNextPage
+    items { orderId customerId status totalAmount placedAt items { productId quantity subtotal } }
+  }
+}
+```
+
+Cancelled orders, with the reason:
+
+```graphql
+{ orders(status: CANCELLED) { totalCount items { orderId cancelledAt cancellationReason } } }
+```
+
+One customer's orders, second page of 10:
+
+```graphql
+{
+  orders(customerId: "3fa85f64-5717-4562-b3fc-2c963f66afa6", limit: 10, offset: 10) {
+    totalCount
+    hasNextPage
+    items { orderId status placedAt confirmedAt }
+  }
+}
+```
+
+From the command line:
+
+```bash
+curl -s localhost:3000/graphql -H 'content-type: application/json' \
+  -d '{"query":"{ orders(limit: 5) { totalCount items { orderId status totalAmount } } }"}'
+```
+
+Invalid arguments return a GraphQL error (no crash), for example `{ orders(limit: 500) { totalCount } }`:
+
+```json
+{ "errors": [{ "message": "limit must not be greater than 100",
+               "extensions": { "code": "BAD_USER_INPUT", "validationErrors": ["limit must not be greater than 100"] } }],
+  "data": null }
+```
+
+An unknown `status` fails GraphQL validation (`GRAPHQL_VALIDATION_FAILED`); if MongoDB is down
+the query returns `SERVICE_UNAVAILABLE`.
+
+After changing resolvers, GraphQL types or descriptions, run `npm run schema:generate`. A unit
+test fails while `docs/schema.gql` is out of date or any schema element lacks a description.
 
 ## Running locally
 
@@ -133,8 +199,9 @@ it is down, and the projection catches up once it is back.
 ```bash
 npm run test               # all test projects
 npm run test:unit          # domain and handlers in isolation (no Nest, DB or Kafka)
-npm run test:integration   # REST + payment consumer (real PostgreSQL) and the read model (real MongoDB)
-npm run test:component     # full Nest app against real PostgreSQL, Kafka and MongoDB containers
+npm run test:integration   # REST + payment consumer (real PostgreSQL); read model and GraphQL queries (real MongoDB)
+npm run test:component     # full Nest app (REST → Kafka → projection → GraphQL) on real PostgreSQL, Kafka and MongoDB
+npm run schema:generate    # regenerate docs/schema.gql after GraphQL changes
 npm run test:cov           # with coverage
 ```
 
@@ -149,7 +216,8 @@ npm run build && npm run lint && npm run format:check && npm run test
 ## Documentation
 
 - [Project constitution](.specify/memory/constitution.md): the non-negotiable rules
-- [Read model](docs/read-model.md): document shape, projection rules, rebuild
+- [Read model](docs/read-model.md): document shape, projection rules, indexes, rebuild
+- [GraphQL schema](docs/schema.gql): generated SDL of the read API
 - [Architecture Decision Records](docs/adr/)
 - [Event contracts](docs/events/)
 - [Source layout](src/README.md)
