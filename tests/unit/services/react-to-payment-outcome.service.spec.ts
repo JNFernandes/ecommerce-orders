@@ -10,7 +10,11 @@ import { PaymentOutcome } from '../../../src/domain/payment-outcome.enum';
 import { OrderRepository } from '../../../src/repositories/order.repository';
 import { ProcessedEventRepository } from '../../../src/repositories/processed-event.repository';
 import { ProcessedEventOutcome } from '../../../src/infra/database/entities/processed-event.entity';
-import { OrderNotFoundForPaymentError } from '../../../src/services/errors/payment-outcome.errors';
+import {
+  EventAlreadyProcessedError,
+  OrderNotFoundForPaymentError,
+} from '../../../src/services/errors/payment-outcome.errors';
+import { ALREADY_PROCESSED } from '../../../src/services/react-to-payment-outcome.service';
 
 const CUSTOMER_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
 
@@ -228,5 +232,65 @@ describe('ReactToPaymentOutcomeService — payment failed', () => {
     );
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy.mock.calls[0][0] as string).toContain(inbound.paymentId);
+  });
+});
+
+describe('ReactToPaymentOutcomeService — duplicates', () => {
+  it('should return ALREADY_PROCESSED without loading the order when the eventId was already processed', async () => {
+    const order = pendingOrder();
+    const { service, commandBus, orderRepository, processedEventRepository } = buildService(order);
+    (processedEventRepository.exists as jest.Mock).mockResolvedValue(true);
+    const inbound = inboundFor(order.id);
+
+    const result = await service.execute(
+      new ReactToPaymentOutcomeCommand(PaymentOutcome.PROCESSED, inbound),
+    );
+
+    expect(result).toBe(ALREADY_PROCESSED);
+    expect(processedEventRepository.exists).toHaveBeenCalledWith(inbound.eventId);
+    expect(orderRepository.findById).not.toHaveBeenCalled();
+    expect(commandBus.execute).not.toHaveBeenCalled();
+  });
+
+  it('should treat EventAlreadyProcessedError from the dispatched command as already processed', async () => {
+    const order = pendingOrder();
+    const { service, commandBus } = buildService(order);
+    const inbound = inboundFor(order.id);
+    (commandBus.execute as jest.Mock).mockRejectedValue(
+      new EventAlreadyProcessedError(inbound.eventId),
+    );
+
+    const result = await service.execute(
+      new ReactToPaymentOutcomeCommand(PaymentOutcome.PROCESSED, inbound),
+    );
+
+    expect(result).toBe(ALREADY_PROCESSED);
+  });
+
+  it('should treat EventAlreadyProcessedError while recording a no-op as already processed', async () => {
+    const order = confirmedOrder();
+    const { service, processedEventRepository } = buildService(order);
+    const inbound = inboundFor(order.id);
+    (processedEventRepository.recordOutcome as jest.Mock).mockRejectedValue(
+      new EventAlreadyProcessedError(inbound.eventId),
+    );
+
+    const result = await service.execute(
+      new ReactToPaymentOutcomeCommand(PaymentOutcome.PROCESSED, inbound),
+    );
+
+    expect(result).toBe(ALREADY_PROCESSED);
+  });
+
+  it('should still propagate other errors from the dispatched command', async () => {
+    const order = pendingOrder();
+    const { service, commandBus } = buildService(order);
+    (commandBus.execute as jest.Mock).mockRejectedValue(new Error('db down'));
+
+    await expect(
+      service.execute(
+        new ReactToPaymentOutcomeCommand(PaymentOutcome.PROCESSED, inboundFor(order.id)),
+      ),
+    ).rejects.toThrow('db down');
   });
 });

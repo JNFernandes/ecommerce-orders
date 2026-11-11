@@ -168,16 +168,16 @@ Conventional Commits scoped `US-04` (e.g. `feat(US-04): add payment reaction pol
 
 ### Tests for User Story 3 (write first)
 
-- [ ] T037 [P] [US3] Extend `tests/unit/services/react-to-payment-outcome.service.spec.ts`. When `processedEventRepository.exists(eventId)` is true, the service returns without loading the order or dispatching. `EventAlreadyProcessedError` from the dispatched command or from `recordOutcome` is caught and treated as already processed (no rethrow).
-- [ ] T038 [P] [US3] Extend `tests/integration/react-to-payment-outcome.integration.spec.ts`:
+- [X] T037 [P] [US3] Extend `tests/unit/services/react-to-payment-outcome.service.spec.ts`. When `processedEventRepository.exists(eventId)` is true, the service returns without loading the order or dispatching. `EventAlreadyProcessedError` from the dispatched command or from `recordOutcome` is caught and treated as already processed (no rethrow).
+- [X] T038 [P] [US3] Extend `tests/integration/react-to-payment-outcome.integration.spec.ts`:
   - The same processed message handled twice gives one `processed_events` row, one publish call, and two commits.
   - The same message after a no-op is still recognised.
   - Calling `applyInboundStatusChange` with an `eventId` that already exists in `processed_events` (while the order is PENDING) throws `EventAlreadyProcessedError`, and the order stays PENDING (transaction rolled back).
-- [ ] T039 [US3] Extend `tests/component/react-to-payment-outcome.component.spec.ts`. After the US1 confirmation, re-produce the **identical** message, wait 3s, and assert that the status is still `CONFIRMED`, exactly one `OrderConfirmed` is observed, and `processed_events` has one row for that `eventId`.
+- [X] T039 [US3] Extend `tests/component/react-to-payment-outcome.component.spec.ts`. After the US1 confirmation, re-produce the **identical** message, wait 3s, and assert that the status is still `CONFIRMED`, exactly one `OrderConfirmed` is observed, and `processed_events` has one row for that `eventId`.
 
 ### Implementation for User Story 3
 
-- [ ] T040 [US3] Add the dedupe fast path and the duplicate handling to `ReactToPaymentOutcomeService.execute` in `src/services/react-to-payment-outcome.service.ts`. First, `if (await processedEventRepository.exists(eventId))`, log at debug and return `ALREADY_PROCESSED`. Wrap the dispatch and `recordOutcome` calls so that `EventAlreadyProcessedError` is logged and returned as `ALREADY_PROCESSED`. Add `ALREADY_PROCESSED` to the service's result type (not to the DB enum). Makes T037–T039 pass.
+- [X] T040 [US3] Add the dedupe fast path and the duplicate handling to `ReactToPaymentOutcomeService.execute` in `src/services/react-to-payment-outcome.service.ts`. First, `if (await processedEventRepository.exists(eventId))`, log at debug and return `ALREADY_PROCESSED`. Wrap the dispatch and `recordOutcome` calls so that `EventAlreadyProcessedError` is logged and returned as `ALREADY_PROCESSED`. Add `ALREADY_PROCESSED` to the service's result type (not to the DB enum). Makes T037–T039 pass.
 
 **Checkpoint**: replays are safe. SC-002 and SC-003 hold.
 

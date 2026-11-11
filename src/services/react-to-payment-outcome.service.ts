@@ -8,10 +8,16 @@ import { PaymentReaction, decidePaymentReaction } from '../domain/payment-reacti
 import { ProcessedEventOutcome } from '../infra/database/entities/processed-event.entity';
 import { OrderRepository } from '../repositories/order.repository';
 import { ProcessedEventRepository } from '../repositories/processed-event.repository';
-import { OrderNotFoundForPaymentError } from './errors/payment-outcome.errors';
+import {
+  EventAlreadyProcessedError,
+  OrderNotFoundForPaymentError,
+} from './errors/payment-outcome.errors';
+
+/** Result when the event's `eventId` had already been processed (nothing was done). */
+export const ALREADY_PROCESSED = 'ALREADY_PROCESSED';
 
 /** What happened to a consumed payment event. */
-export type ReactToPaymentOutcomeResult = ProcessedEventOutcome;
+export type ReactToPaymentOutcomeResult = ProcessedEventOutcome | typeof ALREADY_PROCESSED;
 
 /**
  * Orchestrates the reaction to a payment outcome consumed from Kafka: loads the order named by
@@ -33,7 +39,30 @@ export class ReactToPaymentOutcomeService implements ICommandHandler<
     private readonly processedEventRepository: ProcessedEventRepository,
   ) {}
 
+  /**
+   * Reacts to the payment outcome exactly once per `eventId`: a redelivered event (already in
+   * `processed_events`, or recorded concurrently) returns ALREADY_PROCESSED with no effect.
+   */
   async execute(command: ReactToPaymentOutcomeCommand): Promise<ReactToPaymentOutcomeResult> {
+    const { inboundEvent } = command;
+
+    if (await this.processedEventRepository.exists(inboundEvent.eventId)) {
+      this.logger.debug(`skipping already processed event; ${describe(inboundEvent)}`);
+      return ALREADY_PROCESSED;
+    }
+
+    try {
+      return await this.react(command);
+    } catch (error) {
+      if (error instanceof EventAlreadyProcessedError) {
+        this.logger.debug(`event recorded concurrently, skipping; ${describe(inboundEvent)}`);
+        return ALREADY_PROCESSED;
+      }
+      throw error;
+    }
+  }
+
+  private async react(command: ReactToPaymentOutcomeCommand): Promise<ReactToPaymentOutcomeResult> {
     const { inboundEvent } = command;
 
     const order = await this.orderRepository.findById(inboundEvent.orderId);

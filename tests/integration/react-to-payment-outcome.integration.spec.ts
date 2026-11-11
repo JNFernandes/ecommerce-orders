@@ -32,6 +32,7 @@ import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-let
 import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { ProcessedEventRepository } from '../../src/repositories/processed-event.repository';
 import { OrderStatusChangedConcurrentlyError } from '../../src/repositories/errors/order-status-changed-concurrently.error';
+import { EventAlreadyProcessedError } from '../../src/services/errors/payment-outcome.errors';
 import { ProcessedEventOutcome } from '../../src/infra/database/entities/processed-event.entity';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
@@ -332,7 +333,60 @@ describe('Payment outcome consumer (integration)', () => {
     });
   });
 
+  describe('duplicate delivery', () => {
+    it('should change the order and publish only once when the same message is delivered twice', async () => {
+      const orderId = await placeOrder();
+      const message = processedMessage(orderId);
+
+      await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, message));
+      await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, message));
+
+      expect(await statusOf(orderId)).toBe('CONFIRMED');
+      expect(await processedRows(message.eventId as string)).toHaveLength(1);
+      expect(sentTopics()).toEqual([ORDER_CONFIRMED_TOPIC]);
+      expect(commitOffsets).toHaveBeenCalledTimes(2);
+    });
+
+    it('should recognise a redelivered message that was handled as a no-op', async () => {
+      const orderId = await placeOrder();
+      await setStatus(orderId, 'CANCELLED');
+      const message = processedMessage(orderId);
+
+      await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, message));
+      await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, message));
+
+      expect(await processedRows(message.eventId as string)).toEqual([
+        { outcome: 'IGNORED_CONFLICT' },
+      ]);
+      expect(producerSend).not.toHaveBeenCalled();
+      expect(commitOffsets).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('OrderRepository.applyInboundStatusChange', () => {
+    it('should roll back the status change when the eventId is already recorded', async () => {
+      const orderId = await placeOrder();
+      const eventId = randomUUID();
+      await dataSource.query(
+        `INSERT INTO processed_events ("eventId", topic, "orderId", "paymentId", outcome)
+         VALUES ($1, $2, $3, $4, 'IGNORED_CONFLICT')`,
+        [eventId, PAYMENT_PROCESSED_TOPIC, orderId, randomUUID()],
+      );
+      const orderRepository = app.get(OrderRepository);
+      const order = await orderRepository.findById(orderId);
+      order!.confirm();
+
+      await expect(
+        orderRepository.applyInboundStatusChange(
+          order!,
+          { eventId, topic: PAYMENT_PROCESSED_TOPIC, orderId, paymentId: randomUUID() },
+          ProcessedEventOutcome.CONFIRMED,
+        ),
+      ).rejects.toThrow(EventAlreadyProcessedError);
+
+      expect(await statusOf(orderId)).toBe('PENDING');
+    });
+
     it('should not overwrite an order whose status changed concurrently, and roll back', async () => {
       const orderId = await placeOrder();
       const orderRepository = app.get(OrderRepository);

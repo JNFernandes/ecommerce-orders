@@ -274,4 +274,28 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
     expect(cancelled).toHaveLength(1);
     expect(cancelled[0].reason).toBe(reason);
   });
+
+  it('should change nothing when the same payment event is replayed', async () => {
+    const orderId = await placeOrder();
+    const message = paymentProcessed(orderId);
+    const { eventId } = JSON.parse(message) as { eventId: string };
+
+    await publish(PAYMENT_PROCESSED_TOPIC, message);
+    await waitFor(async () => {
+      expect((await orderRow(orderId)).status).toBe('CONFIRMED');
+    });
+    await waitFor(() => {
+      expect(eventsFor(ORDER_CONFIRMED_TOPIC, orderId)).toHaveLength(1);
+    });
+
+    await publish(PAYMENT_PROCESSED_TOPIC, message);
+    await sleep(3_000);
+
+    expect((await orderRow(orderId)).status).toBe('CONFIRMED');
+    expect(eventsFor(ORDER_CONFIRMED_TOPIC, orderId)).toHaveLength(1);
+    const rows = await dataSource.query('SELECT 1 FROM processed_events WHERE "eventId" = $1', [
+      eventId,
+    ]);
+    expect(rows).toHaveLength(1);
+  });
 });
