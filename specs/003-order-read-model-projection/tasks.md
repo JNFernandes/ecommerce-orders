@@ -42,14 +42,14 @@ the consumer in `src/infra/kafka/`, not by `src/read-model/`.
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Install dependencies: `npm install @nestjs/mongoose@^10.1.0 mongoose@^8` and `npm install -D @testcontainers/mongodb@10.28.0`. Commit both `package.json` and `package-lock.json`. Verify `npm ls @nestjs/mongoose mongoose @testcontainers/mongodb` shows no peer warnings.
-- [ ] T002 Extend `src/config/configuration.ts`:
+- [X] T001 Install dependencies: `npm install @nestjs/mongoose@^10.1.0 mongoose@^8` and `npm install -D @testcontainers/mongodb@10.28.0`. Commit both `package.json` and `package-lock.json`. Verify `npm ls @nestjs/mongoose mongoose @testcontainers/mongodb` shows no peer warnings.
+- [X] T002 Extend `src/config/configuration.ts`:
   - Add `ReadModelConfig { mongoUri: string }` (`MONGO_URI`, default `mongodb://localhost:27017/orders_read`) and add `readModel` to `AppConfig`.
   - Add `projectionGroupId` to `KafkaConfig` (`KAFKA_PROJECTION_GROUP_ID`, default `ecommerce-orders-projection`).
   - JSDoc each field.
   - Update the JSDoc of `consumerEnabled` and the retry fields to say they apply to **both** consumers.
-- [ ] T003 [P] Append to `.env.example`, under a `# Read model (US-05)` comment: `MONGO_URI=mongodb://mongo_user:mongo_pass@localhost:27017/orders_read?authSource=admin` and `KAFKA_PROJECTION_GROUP_ID=ecommerce-orders-projection`. Add the same two lines to the local `.env` (git-ignored) so `start:dev` works.
-- [ ] T004 [P] In `jest.config.js`, add `'src/read-model/**/*.ts'`, `'!src/read-model/**/*.module.ts'` and `'!src/read-model/**/*.schema.ts'` to `collectCoverageFrom`, and a `'src/read-model/**/*.ts'` entry in `coverageThreshold` with 80 on all four metrics.
+- [X] T003 [P] Append to `.env.example`, under a `# Read model (US-05)` comment: `MONGO_URI=mongodb://mongo_user:mongo_pass@localhost:27017/orders_read?authSource=admin` and `KAFKA_PROJECTION_GROUP_ID=ecommerce-orders-projection`. Add the same two lines to the local `.env` (git-ignored) so `start:dev` works.
+- [X] T004 [P] In `jest.config.js`, add `'src/read-model/**/*.ts'`, `'!src/read-model/**/*.module.ts'` and `'!src/read-model/**/*.schema.ts'` to `collectCoverageFrom`, and a `'src/read-model/**/*.ts'` entry in `coverageThreshold` with 80 on all four metrics.
 
 **Checkpoint**: `npm run build` and `npm run test` are green (no behaviour change yet).
 

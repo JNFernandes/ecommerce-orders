@@ -13,20 +13,37 @@ export interface KafkaConfig {
   clientId: string;
   /** Consumer group id used by the payment events consumer (`KAFKA_GROUP_ID`). */
   groupId: string;
-  /** Whether the payment events consumer starts on bootstrap (`KAFKA_CONSUMER_ENABLED`, default true). */
+  /**
+   * Consumer group id used by the order read-model projection (`KAFKA_PROJECTION_GROUP_ID`,
+   * default `ecommerce-orders-projection`). Separate from `groupId`.
+   */
+  projectionGroupId: string;
+  /**
+   * Whether the Kafka consumers (payment events and read-model projection) start on bootstrap
+   * (`KAFKA_CONSUMER_ENABLED`, default true).
+   */
   consumerEnabled: boolean;
-  /** Attempts before a retryable failure is dead-lettered (`PAYMENT_CONSUMER_MAX_ATTEMPTS`, default 5). */
+  /**
+   * Attempts before a retryable failure is dead-lettered, for both consumers
+   * (`PAYMENT_CONSUMER_MAX_ATTEMPTS`, default 5; name kept for compatibility).
+   */
   maxAttempts: number;
-  /** First retry delay in ms (`PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, default 1000). */
+  /** First retry delay in ms, for both consumers (`PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, default 1000). */
   backoffInitialMs: number;
-  /** Maximum retry delay in ms (`PAYMENT_CONSUMER_BACKOFF_MAX_MS`, default 30000). */
+  /** Maximum retry delay in ms, for both consumers (`PAYMENT_CONSUMER_BACKOFF_MAX_MS`, default 30000). */
   backoffMaxMs: number;
+}
+
+export interface ReadModelConfig {
+  /** MongoDB connection string for the read model (`MONGO_URI`). */
+  mongoUri: string;
 }
 
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
   kafka: KafkaConfig;
+  readModel: ReadModelConfig;
 }
 
 export default (): AppConfig => ({
@@ -42,9 +59,13 @@ export default (): AppConfig => ({
     brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9092').split(','),
     clientId: process.env.KAFKA_CLIENT_ID ?? 'ecommerce-orders',
     groupId: process.env.KAFKA_GROUP_ID ?? 'ecommerce-orders-consumer',
+    projectionGroupId: process.env.KAFKA_PROJECTION_GROUP_ID ?? 'ecommerce-orders-projection',
     consumerEnabled: process.env.KAFKA_CONSUMER_ENABLED !== 'false',
     maxAttempts: parseInt(process.env.PAYMENT_CONSUMER_MAX_ATTEMPTS ?? '5', 10),
     backoffInitialMs: parseInt(process.env.PAYMENT_CONSUMER_BACKOFF_INITIAL_MS ?? '1000', 10),
     backoffMaxMs: parseInt(process.env.PAYMENT_CONSUMER_BACKOFF_MAX_MS ?? '30000', 10),
+  },
+  readModel: {
+    mongoUri: process.env.MONGO_URI ?? 'mongodb://localhost:27017/orders_read',
   },
 });
