@@ -30,6 +30,9 @@ module.exports = {
     'src/services/**/*.ts',
     'src/read-model/**/*.ts',
     '!src/read-model/**/*.schema.ts',
+    'src/controllers/**/*.resolver.ts',
+    'src/graphql/**/*.ts',
+    '!src/graphql/print-schema.ts',
     '!**/*.module.ts',
     '!**/index.ts',
   ],
@@ -47,6 +50,18 @@ module.exports = {
       statements: 80,
     },
     'src/read-model/**/*.ts': {
+      branches: 80,
+      functions: 80,
+      lines: 80,
+      statements: 80,
+    },
+    'src/controllers/**/*.resolver.ts': {
+      branches: 80,
+      functions: 80,
+      lines: 80,
+      statements: 80,
+    },
+    'src/graphql/**/*.ts': {
       branches: 80,
       functions: 80,
       lines: 80,

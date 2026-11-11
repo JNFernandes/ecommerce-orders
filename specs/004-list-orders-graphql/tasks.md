@@ -42,9 +42,9 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Add `GraphqlConfig { devTools: boolean }` to `src/config/configuration.ts` (`graphql.devTools = process.env.NODE_ENV !== 'production'`), with JSDoc, and add `graphql` to `AppConfig`.
-- [ ] T002 Create `configureApp(app: INestApplication): void` in `src/app.setup.ts`. Move the global `ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true })` there from `src/main.ts`, and call it from `main.ts`. Behaviour is unchanged, and the existing tests (which set the pipe inline) stay untouched.
-- [ ] T003 [P] In `jest.config.js`, add `src/controllers/**/*.resolver.ts` and `src/graphql/**/*.ts` (excluding `src/graphql/print-schema.ts`, which is tooling) to `collectCoverageFrom`, with an 80% threshold entry for each glob.
+- [X] T001 Add `GraphqlConfig { devTools: boolean }` to `src/config/configuration.ts` (`graphql.devTools = process.env.NODE_ENV !== 'production'`), with JSDoc, and add `graphql` to `AppConfig`.
+- [X] T002 Create `configureApp(app: INestApplication): void` in `src/app.setup.ts`. Move the global `ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true })` there from `src/main.ts`, and call it from `main.ts`. Behaviour is unchanged, and the existing tests (which set the pipe inline) stay untouched.
+- [X] T003 [P] In `jest.config.js`, add `src/controllers/**/*.resolver.ts` and `src/graphql/**/*.ts` (excluding `src/graphql/print-schema.ts`, which is tooling) to `collectCoverageFrom`, with an 80% threshold entry for each glob.
 
 **Checkpoint**: build and tests are green, with no behaviour change.
 
