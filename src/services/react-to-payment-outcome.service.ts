@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { ReactToPaymentOutcomeCommand } from '../commands/react-to-payment-outcome.command';
 import { ConfirmOrderCommand } from '../commands/confirm-order.command';
+import { CancelOrderCommand } from '../commands/cancel-order.command';
 import { InboundEventRef } from '../commands/inbound-event-ref';
 import { PaymentReaction, decidePaymentReaction } from '../domain/payment-reaction.policy';
 import { ProcessedEventOutcome } from '../infra/database/entities/processed-event.entity';
@@ -50,15 +51,22 @@ export class ReactToPaymentOutcomeService implements ICommandHandler<
         this.logger.debug(`order ${order.id} already CONFIRMED; ${describe(inboundEvent)}`);
         return this.recordNoOp(inboundEvent, ProcessedEventOutcome.IGNORED_ALREADY_CONFIRMED);
 
+      case PaymentReaction.CANCEL:
+        await this.commandBus.execute(
+          new CancelOrderCommand(order.id, { reason: command.reason ?? '', inboundEvent }),
+        );
+        return ProcessedEventOutcome.CANCELLED;
+
+      case PaymentReaction.ALREADY_CANCELLED:
+        this.logger.debug(`order ${order.id} already CANCELLED; ${describe(inboundEvent)}`);
+        return this.recordNoOp(inboundEvent, ProcessedEventOutcome.IGNORED_ALREADY_CANCELLED);
+
       case PaymentReaction.CONFLICT:
         this.logger.warn(
           `ignoring ${command.outcome} payment for order ${order.id} in status ${order.status}; ` +
             describe(inboundEvent),
         );
         return this.recordNoOp(inboundEvent, ProcessedEventOutcome.IGNORED_CONFLICT);
-
-      default:
-        throw new Error(`payment reaction ${reaction} is not supported yet`);
     }
   }
 

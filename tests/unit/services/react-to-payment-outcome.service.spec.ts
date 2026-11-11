@@ -3,6 +3,7 @@ import { CommandBus } from '@nestjs/cqrs';
 import { ReactToPaymentOutcomeService } from '../../../src/services/react-to-payment-outcome.service';
 import { ReactToPaymentOutcomeCommand } from '../../../src/commands/react-to-payment-outcome.command';
 import { ConfirmOrderCommand } from '../../../src/commands/confirm-order.command';
+import { CancelOrderCommand } from '../../../src/commands/cancel-order.command';
 import { InboundEventRef } from '../../../src/commands/inbound-event-ref';
 import { Order } from '../../../src/domain/order.aggregate';
 import { PaymentOutcome } from '../../../src/domain/payment-outcome.enum';
@@ -150,5 +151,82 @@ describe('ReactToPaymentOutcomeService — payment processed', () => {
     expect(orderRepository.findById).toHaveBeenCalledTimes(1);
     expect(orderRepository.findById).toHaveBeenCalledWith(inbound.orderId);
     expect(orderRepository.findById).not.toHaveBeenCalledWith(inbound.paymentId);
+  });
+});
+
+describe('ReactToPaymentOutcomeService — payment failed', () => {
+  const reason = 'Amount exceeds threshold';
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('should dispatch CancelOrderCommand with the reason and inbound event when the order is PENDING', async () => {
+    const order = pendingOrder();
+    const { service, commandBus, processedEventRepository } = buildService(order);
+    const inbound = inboundFor(order.id, 'payments.payment-failed');
+
+    const result = await service.execute(
+      new ReactToPaymentOutcomeCommand(PaymentOutcome.FAILED, inbound, reason),
+    );
+
+    expect(result).toBe(ProcessedEventOutcome.CANCELLED);
+    expect(commandBus.execute).toHaveBeenCalledWith(
+      new CancelOrderCommand(order.id, { reason, inboundEvent: inbound }),
+    );
+    expect(processedEventRepository.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it('should pass an empty reason when the failed payment carried none', async () => {
+    const order = pendingOrder();
+    const { service, commandBus } = buildService(order);
+    const inbound = inboundFor(order.id, 'payments.payment-failed');
+
+    await service.execute(new ReactToPaymentOutcomeCommand(PaymentOutcome.FAILED, inbound));
+
+    const command = (commandBus.execute as jest.Mock).mock.calls[0][0] as CancelOrderCommand;
+    expect(command.reason).toBe('');
+  });
+
+  it('should record IGNORED_ALREADY_CANCELLED and dispatch nothing when the order is already CANCELLED', async () => {
+    const order = cancelledOrder();
+    const { service, commandBus, processedEventRepository } = buildService(order);
+    const inbound = inboundFor(order.id, 'payments.payment-failed');
+
+    const result = await service.execute(
+      new ReactToPaymentOutcomeCommand(PaymentOutcome.FAILED, inbound, reason),
+    );
+
+    expect(result).toBe(ProcessedEventOutcome.IGNORED_ALREADY_CANCELLED);
+    expect(commandBus.execute).not.toHaveBeenCalled();
+    expect(processedEventRepository.recordOutcome).toHaveBeenCalledWith(
+      inbound,
+      ProcessedEventOutcome.IGNORED_ALREADY_CANCELLED,
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('should record IGNORED_CONFLICT and log a warning when the order is CONFIRMED', async () => {
+    const order = confirmedOrder();
+    const { service, commandBus, processedEventRepository } = buildService(order);
+    const inbound = inboundFor(order.id, 'payments.payment-failed');
+
+    const result = await service.execute(
+      new ReactToPaymentOutcomeCommand(PaymentOutcome.FAILED, inbound, reason),
+    );
+
+    expect(result).toBe(ProcessedEventOutcome.IGNORED_CONFLICT);
+    expect(commandBus.execute).not.toHaveBeenCalled();
+    expect(processedEventRepository.recordOutcome).toHaveBeenCalledWith(
+      inbound,
+      ProcessedEventOutcome.IGNORED_CONFLICT,
+    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0] as string).toContain(inbound.paymentId);
   });
 });

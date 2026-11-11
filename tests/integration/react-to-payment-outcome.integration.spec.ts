@@ -12,11 +12,15 @@ import configuration from '../../src/config/configuration';
 import { KafkaModule } from '../../src/infra/kafka/kafka.module';
 import { KAFKA_CLIENT, KAFKA_PRODUCER } from '../../src/infra/kafka/kafka.constants';
 import {
+  ORDER_CANCELLED_TOPIC,
   ORDER_CONFIRMED_TOPIC,
   OrderEventsProducer,
 } from '../../src/infra/kafka/order-events.producer';
 import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.consumer';
-import { PAYMENT_PROCESSED_TOPIC } from '../../src/infra/kafka/payment-message.parser';
+import {
+  PAYMENT_FAILED_TOPIC,
+  PAYMENT_PROCESSED_TOPIC,
+} from '../../src/infra/kafka/payment-message.parser';
 import { CustomerEntity } from '../../src/infra/database/entities/customer.entity';
 import { OrderEntity } from '../../src/infra/database/entities/order.entity';
 import { OrderItemEntity } from '../../src/infra/database/entities/order-item.entity';
@@ -179,6 +183,28 @@ describe('Payment outcome consumer (integration)', () => {
     };
   }
 
+  function failedMessage(
+    orderId: string,
+    reason: string | null = 'Amount exceeds threshold',
+  ): Record<string, unknown> {
+    return {
+      eventId: randomUUID(),
+      occurredAt: new Date().toISOString(),
+      aggregateId: randomUUID(),
+      version: 1,
+      orderId,
+      reason,
+      failedAt: new Date().toISOString(),
+    };
+  }
+
+  async function cancellationReasonOf(orderId: string): Promise<string | null> {
+    const rows = await dataSource.query('SELECT "cancellationReason" FROM orders WHERE id = $1', [
+      orderId,
+    ]);
+    return rows[0].cancellationReason;
+  }
+
   function payloadFor(topic: string, value: string | Record<string, unknown>): EachMessagePayload {
     const offset = String(nextOffset++);
     return {
@@ -248,6 +274,61 @@ describe('Payment outcome consumer (integration)', () => {
         { outcome: 'IGNORED_ALREADY_CONFIRMED' },
       ]);
       expect(producerSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('payments.payment-failed', () => {
+    it('should cancel a PENDING order with the reason, record CANCELLED and publish the reason', async () => {
+      const orderId = await placeOrder();
+      const message = failedMessage(orderId);
+
+      await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, message));
+
+      expect(await statusOf(orderId)).toBe('CANCELLED');
+      expect(await cancellationReasonOf(orderId)).toBe('Amount exceeds threshold');
+      expect(await processedRows(message.eventId as string)).toEqual([{ outcome: 'CANCELLED' }]);
+      expect(sentTopics()).toEqual([ORDER_CANCELLED_TOPIC]);
+      const sent = producerSend.mock.calls[0][0] as { messages: Array<{ value: string }> };
+      expect(JSON.parse(sent.messages[0].value).reason).toBe('Amount exceeds threshold');
+      expect(commitOffsets).toHaveBeenCalledTimes(1);
+    });
+
+    it('should leave a CONFIRMED order unchanged and record IGNORED_CONFLICT', async () => {
+      const orderId = await placeOrder();
+      await setStatus(orderId, 'CONFIRMED');
+      const message = failedMessage(orderId);
+
+      await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, message));
+
+      expect(await statusOf(orderId)).toBe('CONFIRMED');
+      expect(await cancellationReasonOf(orderId)).toBeNull();
+      expect(await processedRows(message.eventId as string)).toEqual([
+        { outcome: 'IGNORED_CONFLICT' },
+      ]);
+      expect(producerSend).not.toHaveBeenCalled();
+    });
+
+    it('should leave a CANCELLED order unchanged and record IGNORED_ALREADY_CANCELLED', async () => {
+      const orderId = await placeOrder();
+      await setStatus(orderId, 'CANCELLED');
+      const message = failedMessage(orderId);
+
+      await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, message));
+
+      expect(await statusOf(orderId)).toBe('CANCELLED');
+      expect(await processedRows(message.eventId as string)).toEqual([
+        { outcome: 'IGNORED_ALREADY_CANCELLED' },
+      ]);
+      expect(producerSend).not.toHaveBeenCalled();
+    });
+
+    it('should store an empty reason when the failed payment has reason null', async () => {
+      const orderId = await placeOrder();
+
+      await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, failedMessage(orderId, null)));
+
+      expect(await statusOf(orderId)).toBe('CANCELLED');
+      expect(await cancellationReasonOf(orderId)).toBe('');
     });
   });
 

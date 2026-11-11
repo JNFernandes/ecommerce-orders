@@ -135,26 +135,26 @@ Conventional Commits scoped `US-04` (e.g. `feat(US-04): add payment reaction pol
 
 ### Tests for User Story 2 (write first)
 
-- [ ] T027 [P] [US2] Extend `tests/unit/domain/order.aggregate.spec.ts`: `cancel('reason')` sets `cancellationReason` and the `OrderCancelled` event has `reason === 'reason'`. `cancel()` leaves `cancellationReason === null`, and `JSON.stringify(event)` has no `reason` key. `reconstitute` without the new argument gives `cancellationReason === null`. The existing tests stay unchanged.
-- [ ] T028 [P] [US2] Extend `tests/unit/services/cancel-order.service.spec.ts`. With `{ reason, inboundEvent }`, the service calls `cancel(reason)` and `applyInboundStatusChange(order, ref, CANCELLED)`, publishes an event with `reason`, and still dead-letters on publish failure. Without options, the existing `updateStatus` path and payload are unchanged.
-- [ ] T029 [P] [US2] Extend `tests/unit/services/react-to-payment-outcome.service.spec.ts`:
+- [X] T027 [P] [US2] Extend `tests/unit/domain/order.aggregate.spec.ts`: `cancel('reason')` sets `cancellationReason` and the `OrderCancelled` event has `reason === 'reason'`. `cancel()` leaves `cancellationReason === null`, and `JSON.stringify(event)` has no `reason` key. `reconstitute` without the new argument gives `cancellationReason === null`. The existing tests stay unchanged.
+- [X] T028 [P] [US2] Extend `tests/unit/services/cancel-order.service.spec.ts`. With `{ reason, inboundEvent }`, the service calls `cancel(reason)` and `applyInboundStatusChange(order, ref, CANCELLED)`, publishes an event with `reason`, and still dead-letters on publish failure. Without options, the existing `updateStatus` path and payload are unchanged.
+- [X] T029 [P] [US2] Extend `tests/unit/services/react-to-payment-outcome.service.spec.ts`:
   - PENDING + FAILED dispatches `CancelOrderCommand(orderId, { reason, inboundEvent })`.
   - CANCELLED + FAILED records `IGNORED_ALREADY_CANCELLED`.
   - CONFIRMED + FAILED records `IGNORED_CONFLICT` and logs a warning.
-- [ ] T030 [US2] Extend `tests/integration/react-to-payment-outcome.integration.spec.ts` with payment-failed cases. PENDING: the order becomes CANCELLED with `cancellationReason` set, the outcome is `CANCELLED`, and `publishOrderCancelled` receives an event with `reason`. CONFIRMED: unchanged, outcome `IGNORED_CONFLICT`. CANCELLED: unchanged, outcome `IGNORED_ALREADY_CANCELLED`.
-- [ ] T031 [US2] Extend `tests/component/react-to-payment-outcome.component.spec.ts` with an observer on `orders.order-cancelled`. Place an order, produce a payment-failed message with `reason`, poll until `CANCELLED`, and assert `cancellationReason` in the DB and exactly one observed `OrderCancelled` whose `reason` matches.
+- [X] T030 [US2] Extend `tests/integration/react-to-payment-outcome.integration.spec.ts` with payment-failed cases. PENDING: the order becomes CANCELLED with `cancellationReason` set, the outcome is `CANCELLED`, and `publishOrderCancelled` receives an event with `reason`. CONFIRMED: unchanged, outcome `IGNORED_CONFLICT`. CANCELLED: unchanged, outcome `IGNORED_ALREADY_CANCELLED`.
+- [X] T031 [US2] Extend `tests/component/react-to-payment-outcome.component.spec.ts` with an observer on `orders.order-cancelled`. Place an order, produce a payment-failed message with `reason`, poll until `CANCELLED`, and assert `cancellationReason` in the DB and exactly one observed `OrderCancelled` whose `reason` matches.
 
 ### Implementation for User Story 2
 
-- [ ] T032 [US2] Extend the `Order` aggregate in `src/domain/order.aggregate.ts`:
+- [X] T032 [US2] Extend the `Order` aggregate in `src/domain/order.aggregate.ts`:
   - Add `public cancellationReason: string | null` to the private constructor (after `updatedAt`, default `null`).
   - `cancel(reason?: string)` sets `this.cancellationReason = reason ?? null` before raising the event.
   - `reconstitute(..., cancellationReason: string | null = null)`.
   - Update `Order.place` to pass `null`, and update the JSDoc.
-- [ ] T033 [US2] Extend `OrderCancelled` in `src/domain/events/order-cancelled.event.ts` with `public readonly reason?: string`. `from(order)` sets it only when `order.cancellationReason !== null`, so `JSON.stringify` omits it otherwise. JSDoc it as optional and additive, with `version` still 1. Makes T027 pass.
-- [ ] T034 [US2] In `src/repositories/order.repository.ts`, make `applyInboundStatusChange` also set `"cancellationReason" = order.cancellationReason` in its conditional update, and make `findById` pass `entity.cancellationReason` to `Order.reconstitute`.
-- [ ] T035 [US2] Change `CancelOrderCommand` in `src/commands/cancel-order.command.ts` to `constructor(orderId: string, options?: { reason?: string; inboundEvent?: InboundEventRef })` (expose `reason` and `inboundEvent` as readonly). Then extend `CancelOrderService.execute` in `src/services/cancel-order.service.ts`: call `order.cancel(command.reason)`, use `applyInboundStatusChange(..., CANCELLED)` when `inboundEvent` is set, and `updateStatus` otherwise. The publish and dead-letter block is unchanged. Makes T028 pass.
-- [ ] T036 [US2] Add the `CANCEL` and `ALREADY_CANCELLED` branches to `ReactToPaymentOutcomeService` in `src/services/react-to-payment-outcome.service.ts`. `CANCEL` dispatches `new CancelOrderCommand(orderId, { reason: command.reason ?? '', inboundEvent })`. `ALREADY_CANCELLED` records `IGNORED_ALREADY_CANCELLED`. Makes T029–T031 pass.
+- [X] T033 [US2] Extend `OrderCancelled` in `src/domain/events/order-cancelled.event.ts` with `public readonly reason?: string`. `from(order)` sets it only when `order.cancellationReason !== null`, so `JSON.stringify` omits it otherwise. JSDoc it as optional and additive, with `version` still 1. Makes T027 pass.
+- [X] T034 [US2] In `src/repositories/order.repository.ts`, make `applyInboundStatusChange` also set `"cancellationReason" = order.cancellationReason` in its conditional update, and make `findById` pass `entity.cancellationReason` to `Order.reconstitute`.
+- [X] T035 [US2] Change `CancelOrderCommand` in `src/commands/cancel-order.command.ts` to `constructor(orderId: string, options?: { reason?: string; inboundEvent?: InboundEventRef })` (expose `reason` and `inboundEvent` as readonly). Then extend `CancelOrderService.execute` in `src/services/cancel-order.service.ts`: call `order.cancel(command.reason)`, use `applyInboundStatusChange(..., CANCELLED)` when `inboundEvent` is set, and `updateStatus` otherwise. The publish and dead-letter block is unchanged. Makes T028 pass.
+- [X] T036 [US2] Add the `CANCEL` and `ALREADY_CANCELLED` branches to `ReactToPaymentOutcomeService` in `src/services/react-to-payment-outcome.service.ts`. `CANCEL` dispatches `new CancelOrderCommand(orderId, { reason: command.reason ?? '', inboundEvent })`. `ALREADY_CANCELLED` records `IGNORED_ALREADY_CANCELLED`. Makes T029–T031 pass.
 
 **Checkpoint**: US1 and US2 both work independently, and the full saga (Orders ↔ Payments) completes.
 

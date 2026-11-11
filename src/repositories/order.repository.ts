@@ -65,6 +65,7 @@ export class OrderRepository {
       Number(entity.totalAmount),
       entity.createdAt,
       entity.updatedAt,
+      entity.cancellationReason,
     );
   }
 
@@ -91,7 +92,11 @@ export class OrderRepository {
         const result = await manager
           .createQueryBuilder()
           .update(OrderEntity)
-          .set({ status: order.status, updatedAt: order.updatedAt })
+          .set({
+            status: order.status,
+            updatedAt: order.updatedAt,
+            cancellationReason: order.cancellationReason,
+          })
           .where('id = :id AND status = :pending', {
             id: order.id,
             pending: OrderStatus.PENDING,

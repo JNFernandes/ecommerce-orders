@@ -245,4 +245,33 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
     await sleep(1_500);
     expect(eventsFor(ORDER_CONFIRMED_TOPIC, orderId)).toHaveLength(1);
   });
+
+  it('should cancel the order with the reason and emit exactly one OrderCancelled when payment fails', async () => {
+    const orderId = await placeOrder();
+    const reason = 'Amount 15000.00 USD exceeds the maximum allowed threshold of 10000.00 USD.';
+
+    await publish(
+      PAYMENT_FAILED_TOPIC,
+      JSON.stringify({
+        eventId: randomUUID(),
+        occurredAt: new Date().toISOString(),
+        aggregateId: randomUUID(),
+        version: 1,
+        orderId,
+        reason,
+        failedAt: new Date().toISOString(),
+      }),
+    );
+
+    await waitFor(async () => {
+      expect(await orderRow(orderId)).toEqual({ status: 'CANCELLED', cancellationReason: reason });
+    });
+    await waitFor(() => {
+      expect(eventsFor(ORDER_CANCELLED_TOPIC, orderId)).toHaveLength(1);
+    });
+    await sleep(1_500);
+    const cancelled = eventsFor(ORDER_CANCELLED_TOPIC, orderId);
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0].reason).toBe(reason);
+  });
 });
