@@ -193,19 +193,19 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ### Tests (write first)
 
-- [ ] T028 [P] [US4] Unit test `tests/unit/graphql/schema.spec.ts`:
+- [X] T028 [P] [US4] Unit test `tests/unit/graphql/schema.spec.ts`:
   - `printOrdersSchema()` equals the content of `docs/schema.gql`, after normalising line endings (drift check, FR-015);
   - build the `GraphQLSchema` with the same helper and walk every **non-introspection** named type (object fields with their args, enum values, input fields): every one has a non-empty `description` (FR-009, SC-006);
   - the schema contains `orders(status: OrderStatus, customerId: ID, limit: Int! = 20, offset: Int! = 0): OrdersPage!`.
-- [ ] T029 [US4] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
+- [X] T029 [US4] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
   - the dev app answers an introspection query (`__schema { queryType { name } }`), and `GET /graphql` with `Accept: text/html` returns 200 HTML mentioning the Apollo sandbox;
   - a second app built with `ConfigModule` loading `configuration` while `process.env.NODE_ENV = 'production'` (restored in `afterAll`) rejects the introspection query (error, no `__schema` data), and `GET /graphql` with `Accept: text/html` does not return the sandbox HTML.
 
 ### Implementation
 
-- [ ] T030 [US4] Create `printOrdersSchema(): Promise<string>` in `src/graphql/print-schema.ts`. Create a Nest application context from `GraphQLSchemaBuilderModule`, get `GraphQLSchemaFactory`, call `create([OrdersResolver])`, and return `printSchema(lexicographicSortSchema(schema))` with a trailing newline. Close the context.
-- [ ] T031 [US4] Create `scripts/generate-graphql-schema.ts`, which writes `printOrdersSchema()` to `docs/schema.gql`. Add the `"schema:generate": "ts-node scripts/generate-graphql-schema.ts"` script to `package.json`. Run it and commit `docs/schema.gql`. Makes T028 pass.
-- [ ] T032 [US4] Verify `src/graphql/graphql.config.ts` against T029 (introspection and landing page by `graphql.devTools`), and adjust if the production app still serves a landing page. Makes T029 pass.
+- [X] T030 [US4] Create `printOrdersSchema(): Promise<string>` in `src/graphql/print-schema.ts`. Create a Nest application context from `GraphQLSchemaBuilderModule`, get `GraphQLSchemaFactory`, call `create([OrdersResolver])`, and return `printSchema(lexicographicSortSchema(schema))` with a trailing newline. Close the context.
+- [X] T031 [US4] Create `scripts/generate-graphql-schema.ts`, which writes `printOrdersSchema()` to `docs/schema.gql`. Add the `"schema:generate": "ts-node scripts/generate-graphql-schema.ts"` script to `package.json`. Run it and commit `docs/schema.gql`. Makes T028 pass.
+- [X] T032 [US4] Verify `src/graphql/graphql.config.ts` against T029 (introspection and landing page by `graphql.devTools`), and adjust if the production app still serves a landing page. Makes T029 pass.
 
 **Checkpoint**: all four stories work.
 

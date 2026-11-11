@@ -1,0 +1,102 @@
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+"""
+An order as seen by the read model (eventually consistent with the write side).
+"""
+type Order {
+  """
+  Why the order was cancelled (e.g. the payment failure reason); null when none was given.
+  """
+  cancellationReason: String
+
+  """When the order was cancelled; null unless status is CANCELLED."""
+  cancelledAt: DateTime
+
+  """When the order was confirmed; null unless status is CONFIRMED."""
+  confirmedAt: DateTime
+
+  """Customer who placed the order (UUID)."""
+  customerId: ID!
+
+  """Line items; null until the order-placed event has been projected."""
+  items: [OrderItem!]
+
+  """Order identifier (UUID)."""
+  orderId: ID!
+
+  """
+  When the order was placed; null until the order-placed event has been projected.
+  """
+  placedAt: DateTime
+
+  """Current lifecycle status."""
+  status: OrderStatus!
+
+  """Order total; null until the order-placed event has been projected."""
+  totalAmount: Float
+}
+
+"""One line of an order."""
+type OrderItem {
+  """Product identifier."""
+  productId: String!
+
+  """Number of units ordered."""
+  quantity: Int!
+
+  """quantity × unitPrice, rounded to 2 decimals."""
+  subtotal: Float!
+
+  """Price of one unit."""
+  unitPrice: Float!
+}
+
+"""Lifecycle status of an order."""
+enum OrderStatus {
+  """
+  Cancelled — the payment failed or the order was cancelled through the API.
+  """
+  CANCELLED
+
+  """Payment succeeded; the order is confirmed."""
+  CONFIRMED
+
+  """Placed, waiting for the payment outcome."""
+  PENDING
+}
+
+"""One page of orders, with paging information."""
+type OrdersPage {
+  """Whether more orders exist after this page."""
+  hasNextPage: Boolean!
+
+  """
+  Orders on this page, newest first (orders without a placement time last).
+  """
+  items: [Order!]!
+
+  """Number of orders matching the filters, ignoring paging."""
+  totalCount: Int!
+}
+
+type Query {
+  """
+  Lists orders from the read model, newest first (orders without a placement time last). Eventually consistent: a just-placed order may take a moment to appear.
+  """
+  orders(
+    """Only orders of this customer (UUID)."""
+    customerId: ID
+
+    """Page size, 1–100."""
+    limit: Int! = 20
+
+    """Number of orders to skip, ≥ 0."""
+    offset: Int! = 0
+
+    """Only orders in this status."""
+    status: OrderStatus
+  ): OrdersPage!
+}

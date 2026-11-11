@@ -366,3 +366,67 @@ describe('GraphQL orders query (integration, MongoDB unavailable)', () => {
     await app.close().catch(() => undefined);
   });
 });
+
+describe('GraphQL developer tooling (integration)', () => {
+  let container: StartedMongoDBContainer;
+
+  beforeAll(async () => {
+    container = await new MongoDBContainer('mongo:7').start();
+  });
+
+  afterAll(async () => {
+    await container.stop();
+  });
+
+  async function withApp(
+    nodeEnv: string | undefined,
+    run: (app: INestApplication) => Promise<void>,
+  ): Promise<void> {
+    const previous = process.env.NODE_ENV;
+    if (nodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = nodeEnv;
+    }
+    let app: INestApplication | undefined;
+    try {
+      app = await buildGraphqlTestingApp(mongoUri(container.getConnectionString(), 'tooling'));
+      await run(app);
+    } finally {
+      await app?.close();
+      if (previous === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previous;
+      }
+    }
+  }
+
+  const INTROSPECTION = '{ __schema { queryType { name } } }';
+
+  it('should allow introspection and serve the Apollo Sandbox outside production', async () => {
+    await withApp('development', async (app) => {
+      const introspection = await request(app.getHttpServer())
+        .post('/graphql')
+        .send({ query: INTROSPECTION });
+      expect(introspection.body.data.__schema.queryType.name).toBe('Query');
+
+      const landing = await request(app.getHttpServer()).get('/graphql').set('Accept', 'text/html');
+      expect(landing.status).toBe(200);
+      expect(landing.text).toMatch(/sandbox/i);
+    });
+  });
+
+  it('should refuse introspection and serve no landing page in production', async () => {
+    await withApp('production', async (app) => {
+      const introspection = await request(app.getHttpServer())
+        .post('/graphql')
+        .send({ query: INTROSPECTION });
+      expect(introspection.body.errors?.[0].message).toMatch(/introspection/i);
+      expect(introspection.body.data ?? null).toBeNull();
+
+      const landing = await request(app.getHttpServer()).get('/graphql').set('Accept', 'text/html');
+      expect(landing.text).not.toMatch(/sandbox/i);
+    });
+  });
+});

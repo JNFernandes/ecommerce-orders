@@ -23,7 +23,8 @@
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:run": "npm run typeorm -- migration:run -d src/infra/database/typeorm.datasource.ts",
     "migration:revert": "npm run typeorm -- migration:revert -d src/infra/database/typeorm.datasource.ts",
-    "seed:customers": "ts-node src/infra/database/seeds/seed-customers.ts"
+    "seed:customers": "ts-node src/infra/database/seeds/seed-customers.ts",
+    "schema:generate": "ts-node scripts/generate-graphql-schema.ts"
   },
   "dependencies": {
     "@apollo/server": "^4.11.0",
