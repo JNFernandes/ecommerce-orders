@@ -25,6 +25,9 @@ import { OrderProjectionService } from './order-projection.service';
           uri: readModel?.mongoUri,
           lazyConnection: true,
           bufferCommands: false,
+          // Indexes are created explicitly on connect (ReadModelConnectionMonitor), not at model
+          // compile time, which would race the lazy connection.
+          autoIndex: false,
           serverSelectionTimeoutMS: 5000,
           connectionFactory: observeReadModelConnection,
         };

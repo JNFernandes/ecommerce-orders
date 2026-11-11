@@ -58,25 +58,25 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ### Tests first
 
-- [ ] T004 [P] Extend `tests/unit/read-model/read-model-connection.spec.ts`:
+- [X] T004 [P] Extend `tests/unit/read-model/read-model-connection.spec.ts`:
   - on a successful initial connect, `ReadModelConnectionMonitor` calls `OrderViewRepository.ensureIndexes()` once;
   - after a failed connect followed by a successful `openUri`, it calls it once;
   - if `ensureIndexes` rejects, it logs a warning and does not crash.
 
   Inject a mocked repository.
-- [ ] T005 [P] Extend `tests/integration/order-view.repository.integration.spec.ts`. After `ensureIndexes()`, `collection.listIndexes()` contains `customerId_placedAt` (`{customerId:1, placedAt:-1, _id:-1}`), `status_placedAt` (`{status:1, placedAt:-1, _id:-1}`) and `placedAt` (`{placedAt:-1, _id:-1}`). A second call is a no-op and does not throw.
+- [X] T005 [P] Extend `tests/integration/order-view.repository.integration.spec.ts`. After `ensureIndexes()`, `collection.listIndexes()` contains `customerId_placedAt` (`{customerId:1, placedAt:-1, _id:-1}`), `status_placedAt` (`{status:1, placedAt:-1, _id:-1}`) and `placedAt` (`{placedAt:-1, _id:-1}`). A second call is a no-op and does not throw.
 
 ### Implementation
 
-- [ ] T006 Declare the three indexes in `src/read-model/order-view.schema.ts`, using `OrderViewSchema.index(keys, { name })` exactly as in data-model.md.
-- [ ] T007 Add `ensureIndexes(): Promise<void>` (`model.createIndexes()`, wrapped by the existing `guard`) to `src/read-model/order-view.repository.ts`. Set `autoIndex: false` in the `MongooseModule.forRootAsync` options in `src/read-model/read-model.module.ts`, and in `tests/integration/support/read-model-testing.ts`. Makes T005 pass.
-- [ ] T008 In `src/read-model/read-model-connection.ts`, inject `OrderViewRepository` into `ReadModelConnectionMonitor`. On every successful connect, call `ensureIndexes()`, catching and logging a warning on failure. Update `tests/unit/read-model/read-model-connection.spec.ts`'s construction for the new constructor argument. Makes T004 pass.
-- [ ] T009 [P] Create the GraphQL output types in `src/dto/graphql/`, with a `description` on **every** type, field and enum value. Each file may import only from `src/read-model/` (never `src/domain/`).
+- [X] T006 Declare the three indexes in `src/read-model/order-view.schema.ts`, using `OrderViewSchema.index(keys, { name })` exactly as in data-model.md.
+- [X] T007 Add `ensureIndexes(): Promise<void>` (`model.createIndexes()`, wrapped by the existing `guard`) to `src/read-model/order-view.repository.ts`. Set `autoIndex: false` in the `MongooseModule.forRootAsync` options in `src/read-model/read-model.module.ts`, and in `tests/integration/support/read-model-testing.ts`. Makes T005 pass.
+- [X] T008 In `src/read-model/read-model-connection.ts`, inject `OrderViewRepository` into `ReadModelConnectionMonitor`. On every successful connect, call `ensureIndexes()`, catching and logging a warning on failure. Update `tests/unit/read-model/read-model-connection.spec.ts`'s construction for the new constructor argument. Makes T004 pass.
+- [X] T009 [P] Create the GraphQL output types in `src/dto/graphql/`, with a `description` on **every** type, field and enum value. Each file may import only from `src/read-model/` (never `src/domain/`).
   - `order-status.enum.ts`: `registerEnumType(OrderViewStatus, { name: 'OrderStatus', description, valuesMap: { PENDING: { description }, CONFIRMED: {…}, CANCELLED: {…} } })`.
   - `order-item.type.ts`: `@ObjectType('OrderItem')` with `productId: String!`, `quantity: Int!`, `unitPrice: Float!`, `subtotal: Float!`.
   - `order.type.ts`: `@ObjectType('Order')` with the fields and nullability from data-model.md, plus `static fromView(view: OrderView): OrderType`. It copies only the exposed fields and never `appliedEventIds`, `statusEventId`, `revision` or `updatedAt`.
   - `orders-page.type.ts`: `@ObjectType('OrdersPage')` with `items: [Order!]!`, `totalCount: Int!`, `hasNextPage: Boolean!`.
-- [ ] T010 [P] Unit test `tests/unit/dto/order.type.spec.ts`. `OrderType.fromView` maps every field of a complete `CONFIRMED` view and of a view with `items`/`totalAmount`/`placedAt` `null`. The result has exactly the exposed keys (no bookkeeping fields).
+- [X] T010 [P] Unit test `tests/unit/dto/order.type.spec.ts`. `OrderType.fromView` maps every field of a complete `CONFIRMED` view and of a view with `items`/`totalAmount`/`placedAt` `null`. The result has exactly the exposed keys (no bookkeeping fields).
 
 **Checkpoint**: indexes are created on connect, and the GraphQL types exist (not served yet).
 

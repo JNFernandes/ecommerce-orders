@@ -149,6 +149,17 @@ describe('OrderViewRepository (integration, MongoDB)', () => {
     expect((await repository.findById(orderId))?.view.totalAmount).toBe(1);
   });
 
+  it('should create the list indexes, and be idempotent', async () => {
+    await repository.ensureIndexes();
+    await repository.ensureIndexes();
+
+    const indexes = await connection.collection('order_views').listIndexes().toArray();
+    const byName = Object.fromEntries(indexes.map((index) => [index.name, index.key]));
+    expect(byName.customerId_placedAt).toEqual({ customerId: 1, placedAt: -1, _id: -1 });
+    expect(byName.status_placedAt).toEqual({ status: 1, placedAt: -1, _id: -1 });
+    expect(byName.placedAt).toEqual({ placedAt: -1, _id: -1 });
+  });
+
   it('should return null for an unknown order id', async () => {
     expect(await repository.findById(nextOrderId())).toBeNull();
   });

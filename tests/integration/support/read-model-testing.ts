@@ -25,6 +25,7 @@ export async function buildReadModelTestingModule(
     imports: [
       MongooseModule.forRoot(uri, {
         bufferCommands: false,
+        autoIndex: false,
         serverSelectionTimeoutMS: 2000,
         ...(options.lazy
           ? { lazyConnection: true, connectionFactory: observeReadModelConnection }

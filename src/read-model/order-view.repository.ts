@@ -92,6 +92,16 @@ export class OrderViewRepository {
   }
 
   /**
+   * Creates the indexes declared on the schema (idempotent). Called on every successful
+   * connection because `autoIndex` is off.
+   *
+   * @throws ReadModelUnavailableError when MongoDB is unreachable.
+   */
+  async ensureIndexes(): Promise<void> {
+    await this.guard(() => this.model.createIndexes());
+  }
+
+  /**
    * Runs a MongoDB operation, translating outages into ReadModelUnavailableError. Driver errors
    * during an outage are not always connectivity errors (e.g. a port proxy accepting the TCP
    * connection makes the handshake fail with "Authentication failed"), so any other error is
