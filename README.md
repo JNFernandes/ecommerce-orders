@@ -27,6 +27,9 @@ See [`src/README.md`](src/README.md) for the folder layout.
 - **Write path (built)**: REST → `@nestjs/cqrs` command bus → service/command handler → domain →
   PostgreSQL (TypeORM). Only **after** the save succeeds is the Kafka event published. If the
   publish fails, the event goes to a dead-letter table and the request still succeeds.
+- **Payment outcomes (built, US-04)**: a Kafka consumer reacts to `payments.payment-processed`
+  and `payments.payment-failed` by dispatching the same Confirm/Cancel commands, so an order
+  reaches `CONFIRMED` or `CANCELLED` with no manual call.
 - **Read path (planned)**: GraphQL → query bus → query handlers → a **MongoDB** read model, kept
   up to date by a projection that consumes this service's own Kafka events. It is eventually
   consistent with the write side. See [ADR 0001](docs/adr/0001-cqrs-read-model-in-orders-service.md).
@@ -38,8 +41,8 @@ See [`src/README.md`](src/README.md) for the folder layout.
 | `OrderPlaced` | `orders.order-placed` | Produced | Built |
 | `OrderConfirmed` | `orders.order-confirmed` | Produced | Built |
 | `OrderCancelled` | `orders.order-cancelled` | Produced | Built |
-| `PaymentProcessed` | `payments.payment-processed` | Consumed: confirms the order | Planned |
-| `PaymentFailed` | `payments.payment-failed` | Consumed: cancels the order | Planned |
+| `PaymentProcessed` | `payments.payment-processed` | Consumed: confirms the order | Built |
+| `PaymentFailed` | `payments.payment-failed` | Consumed: cancels the order, stores the reason | Built |
 | `orders.*` (own events) | `orders.*` | Consumed: builds the read model | Planned |
 
 Every event carries `eventId`, `occurredAt`, `aggregateId` and `version`. Payment events
@@ -47,13 +50,24 @@ reference the order by `orderId`; their `aggregateId` is the payment id. Consume
 `eventId`. The order/payment flow is a choreographed saga ([ADR 0003](docs/adr/0003-saga-by-choreography.md)).
 Payload details are in [`docs/events/`](docs/events/).
 
+### Payment outcome consumer
+
+- Consumer group `KAFKA_GROUP_ID`. The order is looked up by the payment event's `orderId`.
+- Idempotent: each handled `eventId` is stored in `processed_events`, in the same transaction as
+  the status change, and a redelivery changes nothing.
+- The offset is committed only after the outcome is saved. Malformed messages are dead-lettered
+  immediately. Other failures (for example an unknown `orderId`) are retried with exponential
+  backoff and then dead-lettered to `consumed_message_dead_letters`.
+- `OrderCancelled` carries an optional `reason` when the cancellation came from a failed payment.
+- Set `KAFKA_CONSUMER_ENABLED=false` to run the HTTP API without the consumer.
+
 ## Endpoints
 
 | Method | Path | Description | Responses |
 |---|---|---|---|
 | `POST` | `/orders` | Place an order (`customerId`, `items[]`) | `201` `{ orderId }`, `400` invalid input |
 | `POST` | `/orders/:orderId/cancel` | Cancel a `PENDING` order | `200`, `404` not found, `409` not `PENDING` |
-| `POST` | `/orders/:orderId/confirm` | Confirm a `PENDING` order | `200`, `404` not found, `409` not `PENDING` |
+| `POST` | `/orders/:orderId/confirm` | Confirm a `PENDING` order manually (payment success does this automatically) | `200`, `404` not found, `409` not `PENDING` |
 
 Swagger UI is served at `http://localhost:3000/api` while the app is running. Story-level details
 are in [`docs/us-01-place-order.md`](docs/us-01-place-order.md),
@@ -73,7 +87,7 @@ docker compose up -d
 # 2. In this repo
 npm ci
 cp .env.example .env
-npm run migration:run      # create the orders schema in PostgreSQL
+npm run migration:run      # create/upgrade the orders schema in PostgreSQL
 npm run seed:customers     # seed customers for local testing
 npm run start:dev          # http://localhost:3000, Swagger at /api
 ```
@@ -100,7 +114,11 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 | `DB_NAME` | `orders` | PostgreSQL database |
 | `KAFKA_BROKERS` | `localhost:9092` | Comma-separated Kafka brokers |
 | `KAFKA_CLIENT_ID` | `ecommerce-orders` | Kafka client id |
-| `KAFKA_GROUP_ID` | `ecommerce-orders-consumer` | Consumer group id, reserved for the planned consumers |
+| `KAFKA_GROUP_ID` | `ecommerce-orders-consumer` | Consumer group id of the payment events consumer |
+| `KAFKA_CONSUMER_ENABLED` | `true` | Start the payment events consumer (`false` disables it) |
+| `PAYMENT_CONSUMER_MAX_ATTEMPTS` | `5` | Attempts before a failing payment event is dead-lettered |
+| `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS` | `1000` | First retry delay (doubles each attempt) |
+| `PAYMENT_CONSUMER_BACKOFF_MAX_MS` | `30000` | Maximum retry delay |
 
 MongoDB settings will be added together with the read model; the service does not connect to
 MongoDB yet.
@@ -110,7 +128,7 @@ MongoDB yet.
 ```bash
 npm run test               # all test projects
 npm run test:unit          # domain and handlers in isolation (no Nest, DB or Kafka)
-npm run test:integration   # REST endpoints against a real PostgreSQL, Kafka producer mocked
+npm run test:integration   # REST endpoints and the payment consumer against a real PostgreSQL, Kafka mocked
 npm run test:component     # full Nest app against real PostgreSQL and Kafka containers
 npm run test:cov           # with coverage
 ```

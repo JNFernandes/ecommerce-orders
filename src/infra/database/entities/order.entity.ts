@@ -24,6 +24,10 @@ export class OrderEntity {
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   totalAmount!: string;
 
+  /** Why the order was cancelled (set only for payment-driven cancellations), otherwise null. */
+  @Column({ type: 'text', nullable: true })
+  cancellationReason!: string | null;
+
   @OneToMany(() => OrderItemEntity, (item) => item.order, {
     cascade: true,
     eager: true,

@@ -32,6 +32,8 @@ export class Order {
     public readonly totalAmount: number,
     public readonly createdAt: Date,
     public updatedAt: Date,
+    /** Why the order was cancelled, when a reason was given (payment failure); otherwise null. */
+    public cancellationReason: string | null = null,
   ) {}
 
   /**
@@ -80,8 +82,11 @@ export class Order {
    * Cancels a pending order. Only a PENDING order can be cancelled — attempting to
    * cancel an order that is already CONFIRMED or already CANCELLED raises
    * OrderCancellationError instead of silently succeeding.
+   *
+   * @param reason Why the order is cancelled (e.g. the payment failure reason). Omitted for
+   *   cancellations requested through the REST endpoint.
    */
-  cancel(): void {
+  cancel(reason?: string): void {
     if (this.status !== OrderStatus.PENDING) {
       throw new OrderCancellationError(
         `cannot cancel order with status ${this.status}; only a PENDING order can be cancelled`,
@@ -90,6 +95,7 @@ export class Order {
 
     this.status = OrderStatus.CANCELLED;
     this.updatedAt = new Date();
+    this.cancellationReason = reason ?? null;
     this.domainEvents.push(OrderCancelled.from(this));
   }
 
@@ -119,8 +125,18 @@ export class Order {
     totalAmount: number,
     createdAt: Date,
     updatedAt: Date,
+    cancellationReason: string | null = null,
   ): Order {
-    return new Order(id, customerId, status, items, totalAmount, createdAt, updatedAt);
+    return new Order(
+      id,
+      customerId,
+      status,
+      items,
+      totalAmount,
+      createdAt,
+      updatedAt,
+      cancellationReason,
+    );
   }
 
   /** Combines items referencing the same productId into one entry with summed quantity. */

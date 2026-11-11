@@ -52,13 +52,19 @@ warning (`--max-warnings 0`), or a formatting violation.
 ## Event contracts
 
 - Produced: `orders.order-placed`, `orders.order-confirmed`, `orders.order-cancelled`.
-- Consumed (planned): `payments.payment-processed` (confirm), `payments.payment-failed` (cancel),
-  and own `orders.*` events (read-model projection).
+- Consumed: `payments.payment-processed` (confirm) and `payments.payment-failed` (cancel, store
+  `reason`) by `src/infra/kafka/payment-events.consumer.ts` (US-04). Planned: own `orders.*`
+  events for the read-model projection.
+- `OrderCancelled` has an optional `reason` (payment failures only; omitted for REST cancels).
 - Every payload: `eventId` (UUID), `occurredAt` (ISO), `aggregateId` (UUID), `version` (int), JSON.
 - Payment events identify the order by **`orderId`**. Their `aggregateId` is the payment id: never
   use it as an order id.
-- Consumers: idempotent (dedupe by `eventId`), commit offsets only after the DB save, retry with
-  exponential backoff, then dead-letter.
+- Consumers: idempotent (dedupe by `eventId` in `processed_events`, written in the same
+  transaction as the state change), commit offsets only after the DB save, retry with exponential
+  backoff (`retry-with-backoff.ts`), then dead-letter to `consumed_message_dead_letters`. A
+  consumer is an inbound adapter: parse a DTO, dispatch a command, commit. No business logic.
+- Consumer env: `KAFKA_GROUP_ID`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
+  `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, `PAYMENT_CONSUMER_BACKOFF_MAX_MS`.
 - Breaking payload change → new topic version (`orders.order-placed.v2`). Document payloads in
   `docs/events/`.
 

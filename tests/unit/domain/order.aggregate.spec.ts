@@ -158,3 +158,70 @@ describe('Order.confirm()', () => {
     expect(() => order.confirm()).toThrow(/only a PENDING order can be confirmed/);
   });
 });
+
+describe('Order.cancel() with a reason', () => {
+  function pending(): Order {
+    const order = Order.place(CUSTOMER_ID, [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }]);
+    order.pullDomainEvents();
+    return order;
+  }
+
+  it('should store the cancellation reason and carry it on OrderCancelled', () => {
+    const order = pending();
+
+    order.cancel('Amount exceeds threshold');
+
+    expect(order.cancellationReason).toBe('Amount exceeds threshold');
+    const [event] = order.pullDomainEvents() as [OrderCancelled];
+    expect(event.reason).toBe('Amount exceeds threshold');
+  });
+
+  it('should keep an empty-string reason (payment failed without a reason)', () => {
+    const order = pending();
+
+    order.cancel('');
+
+    expect(order.cancellationReason).toBe('');
+    const [event] = order.pullDomainEvents() as [OrderCancelled];
+    expect(event.reason).toBe('');
+  });
+
+  it('should leave cancellationReason null and omit reason from the payload when cancelled without one', () => {
+    const order = pending();
+
+    order.cancel();
+
+    expect(order.cancellationReason).toBeNull();
+    const [event] = order.pullDomainEvents() as [OrderCancelled];
+    expect(JSON.parse(JSON.stringify(event))).not.toHaveProperty('reason');
+  });
+
+  it('should default cancellationReason to null when reconstituted without it', () => {
+    const order = Order.reconstitute(
+      'id-1',
+      CUSTOMER_ID,
+      OrderStatus.PENDING,
+      [],
+      0,
+      new Date(),
+      new Date(),
+    );
+
+    expect(order.cancellationReason).toBeNull();
+  });
+
+  it('should restore cancellationReason when reconstituted with it', () => {
+    const order = Order.reconstitute(
+      'id-1',
+      CUSTOMER_ID,
+      OrderStatus.CANCELLED,
+      [],
+      0,
+      new Date(),
+      new Date(),
+      'too expensive',
+    );
+
+    expect(order.cancellationReason).toBe('too expensive');
+  });
+});

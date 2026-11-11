@@ -18,6 +18,12 @@ export class OrderCancelled {
     public readonly version: number,
     /** The customer whose order was cancelled. */
     public readonly customerId: string,
+    /**
+     * Why the order was cancelled (optional, additive — `version` stays 1). Present only when
+     * the cancellation carried a reason (today: payment failures); omitted from the JSON
+     * otherwise.
+     */
+    public readonly reason?: string,
   ) {}
 
   static from(order: Order): OrderCancelled {
@@ -27,6 +33,7 @@ export class OrderCancelled {
       order.id,
       1,
       order.customerId,
+      order.cancellationReason ?? undefined,
     );
   }
 }

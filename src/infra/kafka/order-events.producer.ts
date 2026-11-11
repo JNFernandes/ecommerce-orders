@@ -9,7 +9,10 @@ export const ORDER_PLACED_TOPIC = 'orders.order-placed';
 export const ORDER_CANCELLED_TOPIC = 'orders.order-cancelled';
 export const ORDER_CONFIRMED_TOPIC = 'orders.order-confirmed';
 
-/** Publishes Order domain events to Kafka. This service only ever produces these topics. */
+/**
+ * Publishes Order domain events to Kafka. These `orders.*` topics are produced only by this
+ * service (it also consumes payment events — see PaymentEventsConsumer).
+ */
 @Injectable()
 export class OrderEventsProducer {
   constructor(@Inject(KAFKA_PRODUCER) private readonly producer: Producer) {}

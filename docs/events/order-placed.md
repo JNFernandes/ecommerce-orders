@@ -44,8 +44,9 @@ systems is delayed.
 
 ## Consumers
 
-This service has no consumer of its own — it is a Kafka **producer only** (per Constitution
-Principle VII). A denormalized, query-optimized read model of orders is intentionally deferred
-to a separate future service, which will consume this topic and own its own database rather
-than living in this repo. Other bounded contexts (inventory, fulfillment, etc.) may also consume
-this topic; their contracts are out of scope for this service.
+- **`ecommerce-payments`** consumes this event to charge the order, reading the order id from
+  `aggregateId`. It answers with `payments.payment-processed` or `payments.payment-failed`, which
+  this service consumes (see [ADR 0003](../adr/0003-saga-by-choreography.md)).
+- **This service (planned)**: the MongoDB read-model projection (US-05 onwards, see
+  [ADR 0001](../adr/0001-cqrs-read-model-in-orders-service.md)).
+- Other bounded contexts may also consume this topic. Their contracts are out of scope here.
