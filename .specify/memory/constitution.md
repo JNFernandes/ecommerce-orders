@@ -1,28 +1,47 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change:    [TEMPLATE] → 1.0.0
-Bump rationale:    Initial population — all placeholders replaced; no prior versioned constitution existed.
+Version change:    1.0.0 → 1.1.0
+Bump rationale:    MINOR — materially expanded guidance (Kafka consumers, MongoDB read model,
+                   ADR numbering, local infrastructure) plus consolidation of the duplicated
+                   Principle IX. No principle removed or redefined in a backward-incompatible way.
+Note:              Principles VI–IX were added after 1.0.0 without a version bump or report
+                   entry; they are recorded here as part of this amendment.
 
 Modified principles:
-  (none — first ratification)
+  - II. CQRS Separation — read model stored in MongoDB, populated by a Kafka projection;
+    read-path models never shared with write-path TypeORM entities.
+  - VI. Testing Strategy — read-flow component tests use a real MongoDB container.
+  - VII. Kafka & Event Publishing → VII. Kafka Events (Producer & Consumers) — "producer only"
+    replaced; produced/consumed topics listed; consumer rules (idempotency by eventId, offset
+    commit only after DB save, exponential backoff, then dead-letter); payment events identify
+    the order by `orderId`, never by `aggregateId` (which is the payment id).
+  - IX. "Build Integrity" + IX. "Build & Code Quality Integrity" → merged into a single
+    IX. Build & Code Quality Integrity (NON-NEGOTIABLE) with the four-step gate
+    (build, lint, format:check, test) and the ESLint/config requirements.
 
 Added sections:
-  - Core Principles (I–V)
-  - Technology Stack
-  - Documentation Standards
-  - Governance
+  - (no new top-level sections)
+  - Technology Stack: MongoDB via @nestjs/mongoose, testcontainers for MongoDB,
+    "Local infrastructure: ecommerce-infra (docker compose)".
+  - Documentation Standards: ADRs live in docs/adr/ and are numbered (0001-...).
 
 Removed sections:
-  (none)
+  - Duplicate "IX. Build Integrity (NON-NEGOTIABLE)" (content subsumed by the merged IX).
 
 Templates reviewed:
-  ✅ .specify/templates/plan-template.md  — Constitution Check gate references constitution at runtime; no static change needed.
-  ✅ .specify/templates/spec-template.md  — Generic structure; compatible with domain model and CQRS constraints defined here.
-  ✅ .specify/templates/tasks-template.md — Phase/story structure is compatible; DDD layer breakdown maps naturally to implementation phases.
+  ✅ .specify/templates/plan-template.md  — Constitution Check gates derive from this file at runtime; no static change needed.
+  ✅ .specify/templates/spec-template.md  — Generic structure; no mandatory section added or removed.
+  ✅ .specify/templates/tasks-template.md — Phase/story structure compatible; consumer/projection work fits existing phases.
+  ✅ .specify/templates/commands/*.md     — Directory not present in this project; nothing to update.
+
+Runtime guidance:
+  ✅ src/README.md — "producer only" / "separate future service" statements removed.
+  ✅ README.md, CLAUDE.md — added at repo root, aligned with this version.
+  ✅ docs/adr/ — index, template and ADRs 0001–0003 added.
 
 Deferred TODOs:
-  (none — all fields resolved from user input)
+  (none)
 -->
 
 # ecommerce-orders Constitution
@@ -46,8 +65,15 @@ Placing business logic in controllers or services is a constitutional violation 
 Write and read paths are architecturally separate and MUST NEVER be mixed.
 
 - **Write path**: REST endpoints → NestJS `@nestjs/cqrs` command bus → Command Handlers → Domain → Repository.
-- **Read path**: GraphQL queries → NestJS `@nestjs/cqrs` query bus → Query Handlers → read-optimized data sources.
-- Write-path models (commands, domain entities) MUST NOT be shared with the read path and vice versa.
+- **Read path**: GraphQL queries → NestJS `@nestjs/cqrs` query bus → Query Handlers → the read model.
+- The **read model is stored in MongoDB**. It is populated exclusively by a projection that consumes
+  this service's order events from Kafka (see Principle VII). Query handlers MUST NOT read the
+  PostgreSQL write store.
+- Write-path models (commands, domain entities, TypeORM entities) MUST NOT be shared with the read
+  path and vice versa. Read-path models (Mongoose schemas, GraphQL types) are defined separately
+  and MUST NOT import, extend or reuse write-path TypeORM entities.
+- The read model is eventually consistent with the write side; this is an accepted trade-off
+  (see `docs/adr/0001-cqrs-read-model-in-orders-service.md`).
 - A controller MUST issue either a command or a query — never both in the same request handler.
 
 Violating this separation (e.g., a REST endpoint that also returns a GraphQL-shaped query result, or a query handler that mutates state) is a constitutional violation.
@@ -93,38 +119,55 @@ Three test layers are required:
 - **Unit tests** — domain logic and handlers in isolation. No NestJS, no DB, no Kafka.
 - **Integration tests** — REST endpoints and GraphQL resolvers. Real test DB via testcontainers. Test happy path, errors, and edge cases.
 - **Component tests** — full NestJS app with real dependencies. Only Kafka and other microservices are mocked. Tests the complete write flow (REST → DB → Kafka emitted) and read flow (GraphQL → read DB → response).
+  Read-flow component tests MUST use a real MongoDB container (testcontainers), not an in-memory fake.
 
-Tools: Jest, Supertest, @nestjs/testing, testcontainers.
+Tools: Jest, Supertest, @nestjs/testing, testcontainers (PostgreSQL, Kafka, MongoDB).
 Minimum coverage: 80% on domain and application layers.
 Test names MUST describe the behaviour: "should publish OrderPlaced event after successful DB save".
 
-### VII. Kafka & Event Publishing
+### VII. Kafka Events (Producer & Consumers)
 
-Kafka is the outbound event bus. This service is a **producer only** for domain events.
+Kafka is the event bus between services. This service both **produces** and **consumes** events.
+
+**Produced topics** (one domain event per topic, named `orders.<event-name>` in kebab-case):
+- `orders.order-placed`
+- `orders.order-confirmed`
+- `orders.order-cancelled`
+
+**Consumed topics:**
+- `payments.payment-processed` — confirms the referenced order.
+- `payments.payment-failed` — cancels the referenced order.
+- This service's own `orders.*` events — feed the projection that builds the MongoDB read model
+  (see Principle II).
 
 **Event publishing rules:**
 - Events MUST only be published after a confirmed PostgreSQL save (see Principle III).
 - Each domain event maps to exactly one Kafka topic.
-- Topics follow the naming convention: `orders.<event-name>` in kebab-case.
-  - `orders.order-placed`
-  - `orders.order-confirmed`
-  - `orders.order-cancelled`
 
 **Event payload rules:**
-- Every event MUST include: `eventId` (UUID), `occurredAt` (ISO timestamp), `aggregateId` (order UUID), and `version` (integer).
+- Every event MUST include: `eventId` (UUID), `occurredAt` (ISO timestamp), `aggregateId` (UUID of
+  the producing aggregate), and `version` (integer).
+- For `orders.*` events, `aggregateId` is the order id.
+- Payment events identify the order by their `orderId` field. Their `aggregateId` is the
+  **payment id** and MUST NOT be used as an order id.
 - Payloads MUST be serialized as JSON.
 - Breaking changes to a payload schema require a new topic version (e.g. `orders.order-placed.v2`).
 - Event classes MUST be documented with JSDoc describing every field.
 
-**Failure handling:**
+**Producer failure handling:**
 - If Kafka publish fails after a successful DB save, the error MUST be logged with full context.
 - Failed events MUST be stored in a dead-letter table in PostgreSQL for retry.
 - The service MUST NOT throw a 500 to the client for Kafka publish failures — the DB save already succeeded.
 
-**Consumer rules (projection processor only):**
-- The projection processor consumes events from Kafka to update the read model.
-- It MUST be idempotent — processing the same event twice MUST produce the same result.
-- Failed projections MUST be retried with exponential backoff before going to dead-letter.
+**Consumer rules (all consumers, including the projection):**
+- Consumers MUST be idempotent: events are deduplicated by `eventId`, and processing the same
+  event twice MUST produce the same result.
+- Offsets MUST be committed only after the resulting database save has succeeded (PostgreSQL for
+  payment consumers, MongoDB for the projection).
+- Failed processing MUST be retried with exponential backoff; once retries are exhausted the
+  event MUST be dead-lettered and the failure logged with full context.
+- State changes driven by consumed events MUST go through the same Domain → Repository path as
+  REST commands (Principles I and III). Consumers MUST NOT contain business logic.
 
 ### VIII. Branching Strategy
 
@@ -162,26 +205,6 @@ When /speckit.specify is invoked for a user story, Claude Code MUST:
 The branch MUST exist before any spec file is written.
 Claude Code MUST NOT generate spec files while on main.
 
-### IX. Build Integrity (NON-NEGOTIABLE)
-
-The project MUST compile successfully at all times.
-
-**Rules:**
-- After every task implementation, Claude Code MUST run the build:
-  `npm run build`
-- If the build fails, Claude Code MUST fix the compilation errors
-  before moving to the next task.
-- A failing build MUST never be committed to the branch.
-- TypeScript compilation errors are treated as blocking issues —
-  not warnings, not deferred items.
-- Claude Code MUST NOT mark a task as complete if the build fails.
-
-**Build command:** `npm run build`
-**Type check command:** `npm run type-check` (if configured)
-
-This ensures the codebase is always in a deployable state
-and TypeScript type errors are caught immediately, not accumulated.
-
 ### IX. Build & Code Quality Integrity (NON-NEGOTIABLE)
 
 The project MUST compile and pass all quality checks at all times.
@@ -198,7 +221,8 @@ The project MUST compile and pass all quality checks at all times.
   moving to the next task.
 - A failing build, lint error, or formatting violation
   MUST never be committed to the branch.
-- Lint warnings are reviewed — lint errors are blocking.
+- TypeScript compilation errors are blocking issues — not warnings, not deferred items.
+- `npm run lint` runs with `--max-warnings 0`, so lint warnings are blocking as well as errors.
 - Claude Code MUST NOT mark a task as complete until
   all four checks pass.
 
@@ -230,9 +254,12 @@ The project MUST compile and pass all quality checks at all times.
 | REST API docs | Swagger / OpenAPI (auto-generated from NestJS decorators) |
 | GraphQL | Apollo Server via `@nestjs/graphql` |
 | Messaging | Kafka via `kafkajs` |
-| Persistence | TypeORM + PostgreSQL |
+| Persistence (write side) | TypeORM + PostgreSQL |
+| Persistence (read model) | MongoDB via `@nestjs/mongoose` |
 | Validation | `class-validator` + `class-transformer` |
-| Containerization | Docker + docker-compose |
+| Testing | Jest, Supertest, `@nestjs/testing`, testcontainers (PostgreSQL, Kafka, MongoDB) |
+| Containerization | Docker (multi-stage `Dockerfile`) |
+| Local infrastructure | ecommerce-infra (docker compose) |
 
 Introducing a new runtime dependency that duplicates a capability already provided by the stack above requires an ADR in `docs/adr/` before the PR can be merged.
 
@@ -244,6 +271,9 @@ Swagger/OpenAPI annotations MUST be present on all REST endpoints and DTOs so th
 Kafka event payloads MUST be documented (field names, types, semantics) in `docs/events/` or inline in the event class JSDoc.
 Each NestJS module MUST include a `README.md` describing its responsibility, exposed endpoints/queries, and domain events it produces or consumes.
 Architectural decisions MUST be recorded as ADRs in `docs/adr/` using the standard template (Context / Decision / Consequences).
+ADRs are numbered sequentially with a four-digit prefix (`0001-short-title.md`, `0002-...`), are
+never renumbered, and are indexed in `docs/adr/README.md`. A superseded ADR is kept and marked as
+superseded by the newer one.
 
 ## Governance
 
@@ -258,4 +288,4 @@ This constitution supersedes all other project conventions and style guides. Whe
 
 **Compliance**: Every PR review MUST verify that no constitutional principle is violated. Reviewers are empowered to block merges for violations without exception. New principles take effect immediately upon merge.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-07-03
+**Version**: 1.1.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-11-11
