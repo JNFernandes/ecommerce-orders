@@ -10,19 +10,15 @@ import { CommandBus } from '@nestjs/cqrs';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
 import { KafkaConfig } from '../../config/configuration';
 import { ReactToPaymentOutcomeCommand } from '../../commands/react-to-payment-outcome.command';
-import {
-  ConsumedMessageDeadLetterRepository,
-  ConsumedMessageMeta,
-} from '../../repositories/consumed-message-dead-letter.repository';
+import { ConsumedMessageDeadLetterRepository } from '../../repositories/consumed-message-dead-letter.repository';
+import { consumeWithDeadLetter } from './consume-with-dead-letter';
 import { KAFKA_CLIENT } from './kafka.constants';
 import {
-  MalformedPaymentMessageError,
   PAYMENT_FAILED_TOPIC,
   PAYMENT_PROCESSED_TOPIC,
   ParsedPaymentMessage,
   parsePaymentMessage,
 } from './payment-message.parser';
-import { RetriesExhaustedError, retryWithBackoff } from './retry-with-backoff';
 
 /**
  * Inbound adapter for payment outcomes (`payments.payment-processed`, `payments.payment-failed`).
@@ -92,86 +88,34 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
   /**
    * Handles one consumed message: parse and validate it, dispatch the reaction (retrying with
    * backoff), and commit `offset + 1` once the outcome — a state change, a no-op record or a
-   * dead-letter row — has been saved.
+   * dead-letter row — has been saved. See consumeWithDeadLetter for the shared flow.
    */
   async handleMessage(payload: EachMessagePayload): Promise<void> {
-    const { topic, partition, message } = payload;
-    const meta: ConsumedMessageMeta = {
-      topic,
-      partition,
-      offset: message.offset,
-      messageKey: message.key?.toString('utf8') ?? null,
-      rawValue: message.value?.toString('utf8') ?? null,
-    };
-
-    let parsed: ParsedPaymentMessage;
-    try {
-      parsed = parsePaymentMessage(topic, message.value);
-    } catch (error) {
-      if (!(error instanceof MalformedPaymentMessageError)) {
-        throw error;
-      }
-      const malformed = { ...meta, eventId: error.eventId, orderId: error.orderId };
-      await this.deadLetters.recordMalformed(malformed, error);
-      this.logger.warn(
-        `dead-lettered malformed message (${error.message}); ${describe(malformed)}`,
-      );
-      await this.commit(payload);
-      return;
-    }
-
-    const identified: ConsumedMessageMeta = {
-      ...meta,
-      eventId: parsed.inboundEvent.eventId,
-      orderId: parsed.inboundEvent.orderId,
-    };
-    try {
-      await retryWithBackoff(
-        () =>
-          this.commandBus.execute(
-            new ReactToPaymentOutcomeCommand(parsed.outcome, parsed.inboundEvent, parsed.reason),
-          ),
-        {
-          maxAttempts: this.config.maxAttempts,
-          initialMs: this.config.backoffInitialMs,
-          maxMs: this.config.backoffMaxMs,
-          isRetryable: (error) => !(error instanceof MalformedPaymentMessageError),
-          heartbeat: payload.heartbeat,
-          onRetry: (attempt, error, delayMs) =>
-            this.logger.warn(
-              `attempt ${attempt}/${this.config.maxAttempts} failed (${messageOf(error)}), ` +
-                `retrying in ${delayMs}ms; ${describe(identified)}`,
-            ),
-        },
-      );
-    } catch (error) {
-      if (!(error instanceof RetriesExhaustedError)) {
-        throw error;
-      }
-      await this.deadLetters.recordRetriesExhausted(identified, error.lastError, error.attempts);
-      this.logger.error(
-        `dead-lettered after ${error.attempts} attempts (${messageOf(error.lastError)}); ` +
-          describe(identified),
-      );
-    }
-
-    await this.commit(payload);
+    await consumeWithDeadLetter<ParsedPaymentMessage>(payload, {
+      parse: parsePaymentMessage,
+      describe: (parsed) => ({
+        eventId: parsed.inboundEvent.eventId,
+        orderId: parsed.inboundEvent.orderId,
+      }),
+      handle: (parsed) =>
+        this.commandBus.execute(
+          new ReactToPaymentOutcomeCommand(parsed.outcome, parsed.inboundEvent, parsed.reason),
+        ),
+      deadLetters: this.deadLetters,
+      retry: {
+        maxAttempts: this.config.maxAttempts,
+        initialMs: this.config.backoffInitialMs,
+        maxMs: this.config.backoffMaxMs,
+      },
+      commit: () =>
+        this.consumer.commitOffsets([
+          {
+            topic: payload.topic,
+            partition: payload.partition,
+            offset: (BigInt(payload.message.offset) + 1n).toString(),
+          },
+        ]),
+      logger: this.logger,
+    });
   }
-
-  private async commit({ topic, partition, message }: EachMessagePayload): Promise<void> {
-    await this.consumer.commitOffsets([
-      { topic, partition, offset: (BigInt(message.offset) + 1n).toString() },
-    ]);
-  }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function describe(meta: ConsumedMessageMeta): string {
-  return (
-    `topic=${meta.topic} partition=${meta.partition} offset=${meta.offset} ` +
-    `eventId=${meta.eventId ?? '-'} orderId=${meta.orderId ?? '-'}`
-  );
 }

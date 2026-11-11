@@ -30,7 +30,9 @@ See [`src/README.md`](src/README.md) for the folder layout.
 - **Payment outcomes (built, US-04)**: a Kafka consumer reacts to `payments.payment-processed`
   and `payments.payment-failed` by dispatching the same Confirm/Cancel commands, so an order
   reaches `CONFIRMED` or `CANCELLED` with no manual call.
-- **Read path (planned)**: GraphQL → query bus → query handlers → a **MongoDB** read model, kept
+- **Read model (built, US-05)**: a projection consumes this service's own `orders.*` events and
+  keeps one MongoDB document per order in `order_views` (see [docs/read-model.md](docs/read-model.md)).
+- **Read path (planned, US-06/07)**: GraphQL → query bus → query handlers → that **MongoDB** read model, kept
   up to date by a projection that consumes this service's own Kafka events. It is eventually
   consistent with the write side. See [ADR 0001](docs/adr/0001-cqrs-read-model-in-orders-service.md).
 
@@ -43,7 +45,7 @@ See [`src/README.md`](src/README.md) for the folder layout.
 | `OrderCancelled` | `orders.order-cancelled` | Produced | Built |
 | `PaymentProcessed` | `payments.payment-processed` | Consumed: confirms the order | Built |
 | `PaymentFailed` | `payments.payment-failed` | Consumed: cancels the order, stores the reason | Built |
-| `orders.*` (own events) | `orders.*` | Consumed: builds the read model | Planned |
+| `orders.*` (own events) | `orders.*` | Consumed: builds the read model (`order_views`) | Built |
 
 Every event carries `eventId`, `occurredAt`, `aggregateId` and `version`. Payment events
 reference the order by `orderId`; their `aggregateId` is the payment id. Consumers dedupe by
@@ -59,7 +61,8 @@ Payload details are in [`docs/events/`](docs/events/).
   immediately. Other failures (for example an unknown `orderId`) are retried with exponential
   backoff and then dead-lettered to `consumed_message_dead_letters`.
 - `OrderCancelled` carries an optional `reason` when the cancellation came from a failed payment.
-- Set `KAFKA_CONSUMER_ENABLED=false` to run the HTTP API without the consumer.
+- Set `KAFKA_CONSUMER_ENABLED=false` to run the HTTP API without the consumers (payment and
+  read-model projection).
 
 ## Endpoints
 
@@ -115,21 +118,23 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 | `KAFKA_BROKERS` | `localhost:9092` | Comma-separated Kafka brokers |
 | `KAFKA_CLIENT_ID` | `ecommerce-orders` | Kafka client id |
 | `KAFKA_GROUP_ID` | `ecommerce-orders-consumer` | Consumer group id of the payment events consumer |
-| `KAFKA_CONSUMER_ENABLED` | `true` | Start the payment events consumer (`false` disables it) |
-| `PAYMENT_CONSUMER_MAX_ATTEMPTS` | `5` | Attempts before a failing payment event is dead-lettered |
+| `KAFKA_PROJECTION_GROUP_ID` | `ecommerce-orders-projection` | Consumer group of the read-model projection |
+| `MONGO_URI` | `mongodb://mongo_user:mongo_pass@localhost:27017/orders_read?authSource=admin` | Read-model database (MongoDB) |
+| `KAFKA_CONSUMER_ENABLED` | `true` | Start both Kafka consumers (`false` disables them) |
+| `PAYMENT_CONSUMER_MAX_ATTEMPTS` | `5` | Attempts before a failing event is dead-lettered (both consumers) |
 | `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS` | `1000` | First retry delay (doubles each attempt) |
 | `PAYMENT_CONSUMER_BACKOFF_MAX_MS` | `30000` | Maximum retry delay |
 
-MongoDB settings will be added together with the read model; the service does not connect to
-MongoDB yet.
+MongoDB is connected lazily: the HTTP API and the payment consumer start and keep working while
+it is down, and the projection catches up once it is back.
 
 ## Tests
 
 ```bash
 npm run test               # all test projects
 npm run test:unit          # domain and handlers in isolation (no Nest, DB or Kafka)
-npm run test:integration   # REST endpoints and the payment consumer against a real PostgreSQL, Kafka mocked
-npm run test:component     # full Nest app against real PostgreSQL and Kafka containers
+npm run test:integration   # REST + payment consumer (real PostgreSQL) and the read model (real MongoDB)
+npm run test:component     # full Nest app against real PostgreSQL, Kafka and MongoDB containers
 npm run test:cov           # with coverage
 ```
 
@@ -144,6 +149,7 @@ npm run build && npm run lint && npm run format:check && npm run test
 ## Documentation
 
 - [Project constitution](.specify/memory/constitution.md): the non-negotiable rules
+- [Read model](docs/read-model.md): document shape, projection rules, rebuild
 - [Architecture Decision Records](docs/adr/)
 - [Event contracts](docs/events/)
 - [Source layout](src/README.md)

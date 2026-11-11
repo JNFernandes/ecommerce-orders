@@ -47,6 +47,7 @@ systems is delayed.
 - **`ecommerce-payments`** consumes this event to charge the order, reading the order id from
   `aggregateId`. It answers with `payments.payment-processed` or `payments.payment-failed`, which
   this service consumes (see [ADR 0003](../adr/0003-saga-by-choreography.md)).
-- **This service (planned)**: the MongoDB read-model projection (US-05 onwards, see
-  [ADR 0001](../adr/0001-cqrs-read-model-in-orders-service.md)).
+- **This service**: the read-model projection (`OrderProjectionConsumer`, consumer group
+  `ecommerce-orders-projection`, US-05) keeps the MongoDB `order_views` read model up to date.
+  See [read-model.md](../read-model.md).
 - Other bounded contexts may also consume this topic. Their contracts are out of scope here.

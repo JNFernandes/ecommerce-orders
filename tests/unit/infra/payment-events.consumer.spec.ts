@@ -18,6 +18,7 @@ const KAFKA_CONFIG: KafkaConfig = {
   brokers: ['localhost:9092'],
   clientId: 'test',
   groupId: 'test-group',
+  projectionGroupId: 'test-projection-group',
   consumerEnabled: true,
   maxAttempts: 3,
   backoffInitialMs: 1,

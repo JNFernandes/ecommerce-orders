@@ -15,7 +15,8 @@ at a glance.
 | `dto/` | — | Request/response shapes validated with `class-validator` (`PlaceOrderDto`) and documented with Swagger; inbound Kafka message DTOs (`PaymentProcessedMessageDto`, `PaymentFailedMessageDto`) |
 | `repositories/` | Repository | Thin persistence classes (`OrderRepository`, `CustomerRepository`, `OrderDeadLetterRepository`, `ProcessedEventRepository`, `ConsumedMessageDeadLetterRepository`) — map domain objects to/from TypeORM entities |
 | `infra/database/` | Infrastructure | TypeORM entities (`entities/`, including `processed_events` and `consumed_message_dead_letters`), migrations (`migrations/`), a local dev seed script (`seeds/`), and the CLI `DataSource` config |
-| `infra/kafka/` | Infrastructure | `KafkaModule` (client and producer wiring), `OrderEventsProducer`, `PaymentEventsConsumer` (inbound adapter for payment events), `payment-message.parser.ts`, `retry-with-backoff.ts` |
+| `infra/kafka/` | Infrastructure | `KafkaModule` (client and producer wiring), `OrderEventsProducer`, `PaymentEventsConsumer` (payment events), `OrderProjectionConsumer` (own order events → read model), the message parsers, `consume-with-dead-letter.ts` (shared parse → retry → dead-letter → commit flow), `retry-with-backoff.ts` |
+| `read-model/` | Read side (CQRS) | `ReadModelModule` (MongoDB, lazy connection), `OrderProjectionService`, `projectOrderEvent` (pure projection rules), `OrderViewRepository`, the `order_views` schema, read-side types and message DTOs. Imports nothing from the write side |
 | `config/` | — | Environment configuration loader used by `ConfigModule` |
 
 ## Where a request goes
@@ -37,12 +38,14 @@ event, or a no-op record. The Confirm/Cancel services save the status change and
 publish. Failures are retried with exponential backoff and then dead-lettered. The offset is
 committed only after the outcome is saved.
 
-## Read model (planned, not yet built)
+## Where an order event goes (US-05)
 
-Per [ADR 0001](../docs/adr/0001-cqrs-read-model-in-orders-service.md), a projection will consume
-this service's own `orders.*` events and build a **MongoDB read model** for GraphQL queries
-(US-05 onwards). Query handlers will read only from that model, and its schemas will not reuse
-the TypeORM entities. There is no GraphQL resolver or MongoDB connection in `src/` yet.
+`OrderProjectionConsumer.handleMessage` (group `KAFKA_PROJECTION_GROUP_ID`) →
+`parseOrderEventMessage` (malformed → `consumed_message_dead_letters`) → `OrderProjectionService` →
+`OrderViewRepository.findById` → `projectOrderEvent` (duplicate → no write) →
+`insert` / `replace` at the read `revision` (MongoDB `order_views`) → commit offset. A MongoDB
+outage is retried and then redelivered rather than dead-lettered. Details in
+[docs/read-model.md](../docs/read-model.md).
 
 ## Endpoints and domain events
 
@@ -54,8 +57,8 @@ the TypeORM entities. There is no GraphQL resolver or MongoDB connection in `src
 
 | Event | Topic | Produced/Consumed |
 |---|---|---|
-| `OrderPlaced` | `orders.order-placed` | Produced by `OrderEventsProducer` after a successful DB save. Will also be consumed by the planned read-model projection — see `specs/001-place-order/contracts/event-order-placed.md` and `docs/events/order-placed.md`. |
-| `OrderCancelled` | `orders.order-cancelled` | Produced by `OrderEventsProducer` after a successful status-update save (REST cancel or payment failure; optional `reason`). Will also be consumed by the planned read-model projection — see `docs/events/order-cancelled.md`. |
-| `OrderConfirmed` | `orders.order-confirmed` | Produced by `OrderEventsProducer` after a successful status-update save. Will also be consumed by the planned read-model projection — see `docs/events/order-confirmed.md`. |
+| `OrderPlaced` | `orders.order-placed` | Produced by `OrderEventsProducer` after a successful DB save. Also consumed by the read-model projection (`OrderProjectionConsumer`) — see `specs/001-place-order/contracts/event-order-placed.md` and `docs/events/order-placed.md`. |
+| `OrderCancelled` | `orders.order-cancelled` | Produced by `OrderEventsProducer` after a successful status-update save (REST cancel or payment failure; optional `reason`). Also consumed by the read-model projection (`OrderProjectionConsumer`) — see `docs/events/order-cancelled.md`. |
+| `OrderConfirmed` | `orders.order-confirmed` | Produced by `OrderEventsProducer` after a successful status-update save. Also consumed by the read-model projection (`OrderProjectionConsumer`) — see `docs/events/order-confirmed.md`. |
 | `PaymentProcessed` | `payments.payment-processed` | **Consumed** by `PaymentEventsConsumer`: confirms the order referenced by `orderId`. Produced by `ecommerce-payments`. See `docs/events/payment-processed.md`. |
 | `PaymentFailed` | `payments.payment-failed` | **Consumed** by `PaymentEventsConsumer`: cancels the order referenced by `orderId` and stores the reason. Produced by `ecommerce-payments`. See `docs/events/payment-failed.md`. |

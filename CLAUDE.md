@@ -7,7 +7,8 @@ Orders microservice: NestJS + TypeScript, DDD, CQRS. The source of truth for eve
 
 - NestJS 10, TypeScript (strict, `any` banned), `@nestjs/cqrs`
 - Write side: REST + Swagger, TypeORM + PostgreSQL
-- Read side (planned): GraphQL (Apollo) + MongoDB via `@nestjs/mongoose`
+- Read side: MongoDB read model `order_views` via `@nestjs/mongoose` (built, US-05); GraphQL
+  (Apollo) queries over it are planned (US-06/07)
 - Kafka via `kafkajs`
 - Jest, Supertest, `@nestjs/testing`, testcontainers
 - Local infra comes from the `ecommerce-infra` repo (`docker compose up -d` there): Kafka
@@ -41,6 +42,11 @@ warning (`--max-warnings 0`), or a formatting violation.
 
 ## CQRS and write flow
 
+- Read side lives in `src/read-model/` and MUST NOT import from `src/domain`,
+  `src/infra/database/entities`, `src/services` or `src/repositories`. Projection rules are the
+  pure `projectOrderEvent`; views are deterministic (event times, sorted ids) — see
+  `docs/read-model.md` and ADR 0004.
+
 - Write: REST → command bus → handler → domain → **PostgreSQL save first → then Kafka publish**.
   Never publish before the save succeeds. If the publish fails, log it, write to the dead-letter
   table and still return success.
@@ -53,8 +59,8 @@ warning (`--max-warnings 0`), or a formatting violation.
 
 - Produced: `orders.order-placed`, `orders.order-confirmed`, `orders.order-cancelled`.
 - Consumed: `payments.payment-processed` (confirm) and `payments.payment-failed` (cancel, store
-  `reason`) by `src/infra/kafka/payment-events.consumer.ts` (US-04). Planned: own `orders.*`
-  events for the read-model projection.
+  `reason`) by `src/infra/kafka/payment-events.consumer.ts` (US-04); own `orders.*` events by
+  `src/infra/kafka/order-projection.consumer.ts` (group `KAFKA_PROJECTION_GROUP_ID`, US-05).
 - `OrderCancelled` has an optional `reason` (payment failures only; omitted for REST cancels).
 - Every payload: `eventId` (UUID), `occurredAt` (ISO), `aggregateId` (UUID), `version` (int), JSON.
 - Payment events identify the order by **`orderId`**. Their `aggregateId` is the payment id: never
@@ -63,7 +69,9 @@ warning (`--max-warnings 0`), or a formatting violation.
   transaction as the state change), commit offsets only after the DB save, retry with exponential
   backoff (`retry-with-backoff.ts`), then dead-letter to `consumed_message_dead_letters`. A
   consumer is an inbound adapter: parse a DTO, dispatch a command, commit. No business logic.
-- Consumer env: `KAFKA_GROUP_ID`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
+- Every consumer goes through `consumeWithDeadLetter` (`src/infra/kafka/`). A store outage
+  (e.g. `ReadModelUnavailableError`) is `isFatal`: rethrown, not dead-lettered, not committed.
+- Consumer env: `KAFKA_GROUP_ID`, `KAFKA_PROJECTION_GROUP_ID`, `MONGO_URI`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
   `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, `PAYMENT_CONSUMER_BACKOFF_MAX_MS`.
 - Breaking payload change → new topic version (`orders.order-placed.v2`). Document payloads in
   `docs/events/`.

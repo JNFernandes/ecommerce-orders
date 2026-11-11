@@ -28,6 +28,8 @@ module.exports = {
   collectCoverageFrom: [
     'src/domain/**/*.ts',
     'src/services/**/*.ts',
+    'src/read-model/**/*.ts',
+    '!src/read-model/**/*.schema.ts',
     '!**/*.module.ts',
     '!**/index.ts',
   ],
@@ -39,6 +41,12 @@ module.exports = {
       statements: 80,
     },
     'src/services/**/*.ts': {
+      branches: 80,
+      functions: 80,
+      lines: 80,
+      statements: 80,
+    },
+    'src/read-model/**/*.ts': {
       branches: 80,
       functions: 80,
       lines: 80,

@@ -21,7 +21,9 @@ import { CancelOrderService } from './services/cancel-order.service';
 import { ConfirmOrderService } from './services/confirm-order.service';
 import { ReactToPaymentOutcomeService } from './services/react-to-payment-outcome.service';
 import { PaymentEventsConsumer } from './infra/kafka/payment-events.consumer';
+import { OrderProjectionConsumer } from './infra/kafka/order-projection.consumer';
 import { OrdersController } from './controllers/orders.controller';
+import { ReadModelModule } from './read-model/read-model.module';
 
 @Module({
   imports: [
@@ -55,6 +57,7 @@ import { OrdersController } from './controllers/orders.controller';
     ]),
     CqrsModule.forRoot(),
     KafkaModule,
+    ReadModelModule,
   ],
   controllers: [OrdersController],
   providers: [
@@ -69,6 +72,7 @@ import { OrdersController } from './controllers/orders.controller';
     ConsumedMessageDeadLetterRepository,
     OrderEventsProducer,
     PaymentEventsConsumer,
+    OrderProjectionConsumer,
   ],
 })
 export class AppModule {}
