@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { ReadModelConfig } from '../config/configuration';
+import { OrderViewRepository } from './order-view.repository';
 
 /** Delay between attempts to (re)establish the initial MongoDB connection. */
 export const READ_MODEL_RECONNECT_DELAY_MS = 5_000;
@@ -20,7 +21,8 @@ export function observeReadModelConnection(connection: Connection): Connection {
 }
 
 /**
- * Keeps trying to establish the read-model connection until it succeeds. Mongoose never retries
+ * Keeps trying to establish the read-model connection until it succeeds, and creates the
+ * read-model indexes each time it does. Mongoose never retries
  * a failed *initial* connection on its own (once connected, the driver handles reconnects), so
  * without this a cold start with MongoDB down would leave the projection broken until restart.
  */
@@ -34,6 +36,7 @@ export class ReadModelConnectionMonitor implements OnApplicationBootstrap, OnApp
   constructor(
     @InjectConnection() private readonly connection: Connection,
     private readonly configService: ConfigService,
+    private readonly repository: OrderViewRepository,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -49,7 +52,10 @@ export class ReadModelConnectionMonitor implements OnApplicationBootstrap, OnApp
 
   private watch(attempt: Promise<unknown>): void {
     attempt.then(
-      () => this.logger.log('read model (MongoDB) connected'),
+      () => {
+        this.logger.log('read model (MongoDB) connected');
+        void this.ensureIndexes();
+      },
       (error: unknown) => {
         if (this.stopped) {
           return;
@@ -62,6 +68,17 @@ export class ReadModelConnectionMonitor implements OnApplicationBootstrap, OnApp
         this.timer.unref();
       },
     );
+  }
+
+  private async ensureIndexes(): Promise<void> {
+    try {
+      await this.repository.ensureIndexes();
+    } catch (error) {
+      this.logger.warn(
+        `could not create read-model indexes (${error instanceof Error ? error.message : String(error)}); ` +
+          'queries still work but may be slower',
+      );
+    }
   }
 
   private reconnect(): void {

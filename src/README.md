@@ -8,11 +8,13 @@ at a glance.
 
 | Folder | Layer (per the project constitution) | Contents |
 |---|---|---|
-| `controllers/` | Controller | `OrdersController` — HTTP I/O only, no business logic. (The Kafka equivalent, `PaymentEventsConsumer`, lives in `infra/kafka/`.) |
+| `controllers/` | Controller | `OrdersController` (REST, write path) and `OrdersResolver` (GraphQL, read path) — I/O only, no business logic. (The Kafka equivalents live in `infra/kafka/`.) |
+| `queries/` | — | CQRS query objects (`ListOrdersQuery`), dispatched via `QueryBus` |
 | `commands/` | — | CQRS command objects (`PlaceOrderCommand`, `CancelOrderCommand`, `ConfirmOrderCommand`, `ReactToPaymentOutcomeCommand`) and `InboundEventRef` — plain data, dispatched via `CommandBus` |
 | `services/` | Service | `PlaceOrderService`, `CancelOrderService`, `ConfirmOrderService` — orchestrate a command: call the domain, then the repository, then Kafka. `ReactToPaymentOutcomeService` — dedupes a payment event, asks the domain policy, then dispatches Confirm/Cancel or records a no-op. Each registered as a CQRS `@CommandHandler` |
 | `domain/` | Domain | `Order` aggregate (`place()`, `cancel()`, `confirm()`), `OrderItem` value object, `OrderPlaced`/`OrderCancelled`/`OrderConfirmed` events, `OrderValidationError`/`OrderCancellationError`/`OrderConfirmationError`, `decidePaymentReaction` (order status × payment outcome rule) — pure business logic, no I/O, no framework dependency |
-| `dto/` | — | Request/response shapes validated with `class-validator` (`PlaceOrderDto`) and documented with Swagger; inbound Kafka message DTOs (`PaymentProcessedMessageDto`, `PaymentFailedMessageDto`) |
+| `dto/` | — | Request/response shapes validated with `class-validator` (`PlaceOrderDto`) and documented with Swagger; inbound Kafka message DTOs (`PaymentProcessedMessageDto`, `PaymentFailedMessageDto`); `dto/graphql/` — GraphQL types (`Order`, `OrderItem`, `OrdersPage`, `OrderStatus`) built from `OrderView`, and `ListOrdersArgs` |
+| `graphql/` | Infrastructure | Apollo options (`graphql.config.ts`), the GraphQL error filter, and the schema printer used by `npm run schema:generate` |
 | `repositories/` | Repository | Thin persistence classes (`OrderRepository`, `CustomerRepository`, `OrderDeadLetterRepository`, `ProcessedEventRepository`, `ConsumedMessageDeadLetterRepository`) — map domain objects to/from TypeORM entities |
 | `infra/database/` | Infrastructure | TypeORM entities (`entities/`, including `processed_events` and `consumed_message_dead_letters`), migrations (`migrations/`), a local dev seed script (`seeds/`), and the CLI `DataSource` config |
 | `infra/kafka/` | Infrastructure | `KafkaModule` (client and producer wiring), `OrderEventsProducer`, `PaymentEventsConsumer` (payment events), `OrderProjectionConsumer` (own order events → read model), the message parsers, `consume-with-dead-letter.ts` (shared parse → retry → dead-letter → commit flow), `retry-with-backoff.ts` |
@@ -37,6 +39,13 @@ event, or a no-op record. The Confirm/Cancel services save the status change and
 `processed_events` row in one transaction (conditional on the order still being `PENDING`), then
 publish. Failures are retried with exponential backoff and then dead-lettered. The offset is
 committed only after the outcome is saved.
+
+## Where a GraphQL query goes (US-06)
+
+`POST /graphql` → `OrdersResolver.orders` (args validated by the global `ValidationPipe`; errors
+mapped by `GraphQLUserInputFilter`) → `QueryBus` → `ListOrdersService` (`@QueryHandler`) →
+`OrderViewRepository.list()` (MongoDB `order_views`, index-backed) → mapped to GraphQL types with
+`OrderType.fromView`. No command, no PostgreSQL.
 
 ## Where an order event goes (US-05)
 

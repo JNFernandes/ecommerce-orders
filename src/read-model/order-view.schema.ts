@@ -71,3 +71,10 @@ export class OrderViewDocument {
 }
 
 export const OrderViewSchema = SchemaFactory.createForClass(OrderViewDocument);
+
+// List-query indexes (US-06): each filter plus the newest-first sort, with `_id` as tie-breaker,
+// so filtering and sorting are fully index-backed. Created by OrderViewRepository.ensureIndexes()
+// once the connection is up (autoIndex is off).
+OrderViewSchema.index({ customerId: 1, placedAt: -1, _id: -1 }, { name: 'customerId_placedAt' });
+OrderViewSchema.index({ status: 1, placedAt: -1, _id: -1 }, { name: 'status_placedAt' });
+OrderViewSchema.index({ placedAt: -1, _id: -1 }, { name: 'placedAt' });

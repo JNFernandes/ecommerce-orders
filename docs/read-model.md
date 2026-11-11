@@ -2,8 +2,8 @@
 
 The query side of CQRS in `ecommerce-orders` ([ADR 0001](adr/0001-cqrs-read-model-in-orders-service.md)).
 Every order has a **view** in MongoDB, kept up to date by a projection that consumes the
-service's own order events. Nothing reads it yet: GraphQL queries arrive in US-06/07. The
-consistency approach is recorded in [ADR 0004](adr/0004-read-model-projection-consistency.md).
+service's own order events. It is read by the GraphQL `orders` query (US-06; see the
+[README](../README.md#graphql-read-path)). The consistency approach is recorded in [ADR 0004](adr/0004-read-model-projection-consistency.md).
 
 ```text
 POST /orders ─▶ PostgreSQL (write model) ─▶ Kafka orders.* ─▶ OrderProjectionConsumer
@@ -29,6 +29,18 @@ second, but a query issued right after a write may not see it yet.
 Nothing under `src/read-model/` imports the write side (`src/domain`, TypeORM entities, write
 services or repositories). The read model has its own `OrderViewStatus` enum, and a unit test
 checks that its values match the write model's `OrderStatus`.
+
+## Indexes
+
+| Name | Keys | Serves |
+|---|---|---|
+| `customerId_placedAt` | `{ customerId: 1, placedAt: -1, _id: -1 }` | `orders(customerId: …)` |
+| `status_placedAt` | `{ status: 1, placedAt: -1, _id: -1 }` | `orders(status: …)` |
+| `placedAt` | `{ placedAt: -1, _id: -1 }` | `orders` without filters |
+
+Declared on the schema and created by `OrderViewRepository.ensureIndexes()` every time the
+connection is established (`autoIndex` is off so index builds never race the lazy connection).
+The list query sorts by `placedAt` desc then `_id` desc, so views without `placedAt` come last.
 
 ## Document shape: `order_views`
 

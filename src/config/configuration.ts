@@ -39,11 +39,20 @@ export interface ReadModelConfig {
   mongoUri: string;
 }
 
+export interface GraphqlConfig {
+  /**
+   * Introspection and the Apollo Sandbox landing page at /graphql. On unless
+   * `NODE_ENV=production`.
+   */
+  devTools: boolean;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
   kafka: KafkaConfig;
   readModel: ReadModelConfig;
+  graphql: GraphqlConfig;
 }
 
 export default (): AppConfig => ({
@@ -67,5 +76,8 @@ export default (): AppConfig => ({
   },
   readModel: {
     mongoUri: process.env.MONGO_URI ?? 'mongodb://localhost:27017/orders_read',
+  },
+  graphql: {
+    devTools: process.env.NODE_ENV !== 'production',
   },
 });

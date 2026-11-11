@@ -149,6 +149,39 @@ describe('OrderViewRepository (integration, MongoDB)', () => {
     expect((await repository.findById(orderId))?.view.totalAmount).toBe(1);
   });
 
+  it('should create the list indexes, and be idempotent', async () => {
+    await repository.ensureIndexes();
+    await repository.ensureIndexes();
+
+    const indexes = await connection.collection('order_views').listIndexes().toArray();
+    const byName = Object.fromEntries(indexes.map((index) => [index.name, index.key]));
+    expect(byName.customerId_placedAt).toEqual({ customerId: 1, placedAt: -1, _id: -1 });
+    expect(byName.status_placedAt).toEqual({ status: 1, placedAt: -1, _id: -1 });
+    expect(byName.placedAt).toEqual({ placedAt: -1, _id: -1 });
+  });
+
+  it('should list newest first with ties by id, nulls last, paged, with the total count', async () => {
+    const customerId = '11111111-0000-4000-8000-000000000000';
+    const at = (minute: number | null): Date | null =>
+      minute === null ? null : new Date(Date.UTC(2026, 10, 12, 9, minute));
+    const ids = ['l1', 'l2', 'l3', 'l4'].map(
+      (_suffix, i) => `22222222-0000-4000-8000-00000000000${i + 1}`,
+    );
+    const minutes = [1, 3, 3, null];
+    for (let i = 0; i < ids.length; i++) {
+      await repository.insert(
+        view(ids[i], { customerId, placedAt: at(minutes[i]), updatedAt: new Date() }),
+      );
+    }
+
+    const first = await repository.list({ customerId }, { limit: 2, offset: 0 });
+    const second = await repository.list({ customerId }, { limit: 2, offset: 2 });
+
+    expect(first.totalCount).toBe(4);
+    expect(first.views.map((v) => v.orderId)).toEqual([ids[2], ids[1]]);
+    expect(second.views.map((v) => v.orderId)).toEqual([ids[0], ids[3]]);
+  });
+
   it('should return null for an unknown order id', async () => {
     expect(await repository.findById(nextOrderId())).toBeNull();
   });

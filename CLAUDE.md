@@ -7,8 +7,8 @@ Orders microservice: NestJS + TypeScript, DDD, CQRS. The source of truth for eve
 
 - NestJS 10, TypeScript (strict, `any` banned), `@nestjs/cqrs`
 - Write side: REST + Swagger, TypeORM + PostgreSQL
-- Read side: MongoDB read model `order_views` via `@nestjs/mongoose` (built, US-05); GraphQL
-  (Apollo) queries over it are planned (US-06/07)
+- Read side: MongoDB read model `order_views` via `@nestjs/mongoose` (US-05), served by a
+  code-first Apollo GraphQL API at `/graphql` (`orders` query, US-06; order by id planned, US-07)
 - Kafka via `kafkajs`
 - Jest, Supertest, `@nestjs/testing`, testcontainers
 - Local infra comes from the `ecommerce-infra` repo (`docker compose up -d` there): Kafka
@@ -22,6 +22,7 @@ npm run lint
 npm run format:check
 npm run test            # also: test:unit, test:integration, test:component (needs Docker)
 npm run migration:run
+npm run schema:generate   # after any GraphQL change; a test fails while docs/schema.gql is stale
 ```
 
 ## Quality gate (after every task, before every commit)
@@ -50,9 +51,13 @@ warning (`--max-warnings 0`), or a formatting violation.
 - Write: REST → command bus → handler → domain → **PostgreSQL save first → then Kafka publish**.
   Never publish before the save succeeds. If the publish fails, log it, write to the dead-letter
   table and still return success.
-- Read: GraphQL → query bus → query handler → MongoDB read model, built by a projection that
-  consumes `orders.*` events. Query handlers never read Postgres. Read models never reuse
-  TypeORM entities.
+- Read: GraphQL resolver (`src/controllers/*.resolver.ts`) → `QueryBus` → `@QueryHandler`
+  (`src/services/`, query objects in `src/queries/`) → `OrderViewRepository` (MongoDB). Resolvers
+  dispatch queries only (never the `CommandBus`); query handlers never read Postgres; GraphQL
+  types live in `src/dto/graphql/`, are built from `OrderView` (never TypeORM entities or the
+  `Order` aggregate) and never expose read-model bookkeeping (`appliedEventIds`, `revision`, …).
+- GraphQL errors: validation → `BAD_USER_INPUT`, read model down → `SERVICE_UNAVAILABLE`
+  (`src/graphql/graphql-user-input.filter.ts`, applied with `@UseFilters` on resolvers).
 - A request handler issues a command **or** a query, never both.
 
 ## Event contracts
@@ -87,7 +92,7 @@ warning (`--max-warnings 0`), or a formatting violation.
 
 ## Documentation
 
-- JSDoc on public classes and methods. Swagger on REST endpoints and DTOs. `description` on GraphQL
-  types and fields.
+- JSDoc on public classes and methods. Swagger on REST endpoints and DTOs. `description` on every
+  GraphQL type, field, argument and enum value (enforced by `tests/unit/graphql/schema.spec.ts`).
 - Architectural decisions go in `docs/adr/NNNN-title.md` (Context / Decision / Consequences),
   indexed in `docs/adr/README.md`.

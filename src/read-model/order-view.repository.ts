@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { OrderView, StoredOrderView } from './order-view';
+import { OrderViewStatus } from './order-view-status.enum';
 import { OrderViewDocument } from './order-view.schema';
 import { OrderViewConcurrencyError, ReadModelUnavailableError } from './errors';
 
@@ -24,6 +25,27 @@ const NOT_CONNECTED_MESSAGE =
 
 /** How long the reachability check may take before MongoDB is considered unavailable. */
 const PING_TIMEOUT_MS = 2_000;
+
+/** Optional filters of the order list (combined with AND). */
+export interface OrderViewFilter {
+  status?: OrderViewStatus;
+  customerId?: string;
+}
+
+/** A validated page request. */
+export interface PageRequest {
+  limit: number;
+  offset: number;
+}
+
+/** One page of views plus the number of views matching the filter. */
+export interface OrderViewPage {
+  views: OrderView[];
+  totalCount: number;
+}
+
+/** Newest first; `_id` breaks ties so pages never overlap. Nulls (no placedAt yet) sort last. */
+const LIST_SORT = { placedAt: -1, _id: -1 } as const;
 
 /** Raw document shape as read back with `lean()`. */
 type StoredDocument = OrderViewDocument;
@@ -89,6 +111,46 @@ export class OrderViewRepository {
     if (result.matchedCount === 0) {
       throw new OrderViewConcurrencyError(view.orderId);
     }
+  }
+
+  /**
+   * Lists views matching `filter`, newest first, one page at a time, together with the number of
+   * matching views. Backed by the indexes declared on the schema.
+   *
+   * @throws ReadModelUnavailableError when MongoDB is unreachable.
+   */
+  async list(filter: OrderViewFilter, page: PageRequest): Promise<OrderViewPage> {
+    const query: Record<string, string> = {};
+    if (filter.status !== undefined) {
+      query.status = filter.status;
+    }
+    if (filter.customerId !== undefined) {
+      query.customerId = filter.customerId;
+    }
+
+    const [documents, totalCount] = await this.guard(() =>
+      Promise.all([
+        this.model
+          .find(query)
+          .sort(LIST_SORT)
+          .skip(page.offset)
+          .limit(page.limit)
+          .lean<StoredDocument[]>()
+          .exec(),
+        this.model.countDocuments(query).exec(),
+      ]),
+    );
+    return { views: documents.map(toView), totalCount };
+  }
+
+  /**
+   * Creates the indexes declared on the schema (idempotent). Called on every successful
+   * connection because `autoIndex` is off.
+   *
+   * @throws ReadModelUnavailableError when MongoDB is unreachable.
+   */
+  async ensureIndexes(): Promise<void> {
+    await this.guard(() => this.model.createIndexes());
   }
 
   /**
