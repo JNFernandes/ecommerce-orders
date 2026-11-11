@@ -229,7 +229,7 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
   - add a "Where a GraphQL query goes" flow line.
 - [X] T036 [P] Update `docs/read-model.md`: "Nothing reads it yet" becomes "Read by the GraphQL `orders` query (US-06)". Add the indexes table, and note that indexes are created on connect (`autoIndex` off).
 - [X] T037 Run the full quality gate and `npm run test:cov`. Confirm all thresholds, including the new `src/controllers/**/*.resolver.ts` and `src/graphql/**` entries, and that `npm run schema:generate && git diff --exit-code docs/schema.gql` is clean.
-- [ ] T038 Validate live with `specs/004-list-orders-graphql/quickstart.md` §2 against ecommerce-infra (and Payments, if running):
+- [X] T038 Validate live with `specs/004-list-orders-graphql/quickstart.md` §2 against ecommerce-infra (and Payments, if running):
   - the sandbox loads;
   - existing orders are listed, and `totalCount` equals `db.order_views.countDocuments()`;
   - a new order appears within 5s and changes status after its payment;
