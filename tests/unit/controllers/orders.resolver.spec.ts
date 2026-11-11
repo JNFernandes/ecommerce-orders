@@ -44,6 +44,27 @@ describe('OrdersResolver.orders', () => {
     expect(query.filter).toEqual({});
   });
 
+  it('should pass the status and customerId filters into the query', async () => {
+    const { resolver, execute } = build();
+
+    await resolver.orders(args({ status: OrderViewStatus.CANCELLED, customerId: VIEW.customerId }));
+
+    const query = execute.mock.calls[0][0] as ListOrdersQuery;
+    expect(query.filter).toEqual({
+      status: OrderViewStatus.CANCELLED,
+      customerId: VIEW.customerId,
+    });
+  });
+
+  it('should leave absent filters out of the query (no undefined keys)', async () => {
+    const { resolver, execute } = build();
+
+    await resolver.orders(args({ customerId: VIEW.customerId }));
+
+    const query = execute.mock.calls[0][0] as ListOrdersQuery;
+    expect(Object.keys(query.filter)).toEqual(['customerId']);
+  });
+
   it('should map the read views to GraphQL orders without read-model bookkeeping', async () => {
     const { resolver } = build();
 

@@ -134,19 +134,19 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ### Tests (write first)
 
-- [ ] T020 [P] [US2] Extend `tests/unit/controllers/orders.resolver.spec.ts`: `status` and `customerId` args are passed into `ListOrdersQuery.filter`, and absent args are not set (no `undefined` keys).
-- [ ] T021 [US2] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
+- [X] T020 [P] [US2] Extend `tests/unit/controllers/orders.resolver.spec.ts`: `status` and `customerId` args are passed into `ListOrdersQuery.filter`, and absent args are not set (no `undefined` keys).
+- [X] T021 [US2] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
   - `orders(status: CANCELLED)` returns only cancelled orders, with `cancellationReason`;
   - `orders(customerId: A)` returns only A's;
   - both together;
   - a filter matching nothing gives `items: []`, `totalCount: 0`, `hasNextPage: false`;
   - paging inside a filter;
   - **index usage**: for the customer, status and unfiltered queries, run the same `find().sort()` with `.explain('queryPlanner')` directly on the model and assert the winning plan contains `IXSCAN` with `indexName` `customerId_placedAt`, `status_placedAt` or `placedAt` respectively (no `SORT` stage).
-- [ ] T022 [US2] Extend `tests/component/list-orders.component.spec.ts`: place an order for a second seeded customer, cancel one order via REST, then poll `orders(customerId: …)` and `orders(status: CANCELLED)` until the expected sets and `totalCount`s are returned.
+- [X] T022 [US2] Extend `tests/component/list-orders.component.spec.ts`: place an order for a second seeded customer, cancel one order via REST, then poll `orders(customerId: …)` and `orders(status: CANCELLED)` until the expected sets and `totalCount`s are returned.
 
 ### Implementation
 
-- [ ] T023 [US2] Add the optional `status` (`@Field(() => OrderViewStatus, { nullable: true, description })`, `@IsOptional() @IsEnum(OrderViewStatus)`) and `customerId` (`@Field(() => ID, { nullable: true, description })`, `@IsOptional() @IsUUID()`) args to `src/dto/graphql/list-orders.args.ts`. Pass them through in `src/controllers/orders.resolver.ts`, omitting undefined keys. Makes T020–T022 pass. (The repository filter from T015 already supports both.)
+- [X] T023 [US2] Add the optional `status` (`@Field(() => OrderViewStatus, { nullable: true, description })`, `@IsOptional() @IsEnum(OrderViewStatus)`) and `customerId` (`@Field(() => ID, { nullable: true, description })`, `@IsOptional() @IsUUID()`) args to `src/dto/graphql/list-orders.args.ts`. Pass them through in `src/controllers/orders.resolver.ts`, omitting undefined keys. Makes T020–T022 pass. (The repository filter from T015 already supports both.)
 
 **Checkpoint**: filtering works and uses its indexes.
 

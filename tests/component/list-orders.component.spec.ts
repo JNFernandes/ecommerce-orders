@@ -200,6 +200,9 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
 
   it('should list placed orders newest first, then reflect a confirmation', async () => {
     const first = await placeOrder(CUSTOMER_A, 10);
+    // Two orders placed in the same millisecond tie on placedAt (then sort by orderId, which is
+    // random); keep their placement times distinct so "newest first" is deterministic here.
+    await new Promise((resolve) => setTimeout(resolve, 20));
     const second = await placeOrder(CUSTOMER_A, 20);
 
     const page = await waitFor(async () => {
@@ -226,6 +229,25 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
       const confirmed = listed.items.find((o) => o.orderId === first);
       expect(confirmed?.status).toBe('CONFIRMED');
       expect(confirmed?.confirmedAt).toEqual(expect.any(String));
+    });
+  });
+
+  it('should filter the listed orders by customer and by status', async () => {
+    const ofB = await placeOrder(CUSTOMER_B, 5);
+    const toCancel = await placeOrder(CUSTOMER_A, 7);
+    const cancel = await request(app.getHttpServer()).post(`/orders/${toCancel}/cancel`);
+    expect(cancel.status).toBe(200);
+
+    await waitFor(async () => {
+      const byCustomer = await listOrders(`customerId: "${CUSTOMER_B}"`);
+      expect(byCustomer.items.map((o) => o.orderId)).toEqual([ofB]);
+      expect(byCustomer.totalCount).toBe(1);
+    });
+    await waitFor(async () => {
+      const cancelled = await listOrders('status: CANCELLED');
+      expect(cancelled.items.map((o) => o.orderId)).toEqual([toCancel]);
+      expect(cancelled.totalCount).toBe(1);
+      expect(cancelled.items[0].cancelledAt).toEqual(expect.any(String));
     });
   });
 });
