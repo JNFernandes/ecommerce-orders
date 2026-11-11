@@ -21,6 +21,7 @@ import { CancelOrderService } from './services/cancel-order.service';
 import { ConfirmOrderService } from './services/confirm-order.service';
 import { ReactToPaymentOutcomeService } from './services/react-to-payment-outcome.service';
 import { PaymentEventsConsumer } from './infra/kafka/payment-events.consumer';
+import { OrderProjectionConsumer } from './infra/kafka/order-projection.consumer';
 import { OrdersController } from './controllers/orders.controller';
 import { ReadModelModule } from './read-model/read-model.module';
 
@@ -71,6 +72,7 @@ import { ReadModelModule } from './read-model/read-model.module';
     ConsumedMessageDeadLetterRepository,
     OrderEventsProducer,
     PaymentEventsConsumer,
+    OrderProjectionConsumer,
   ],
 })
 export class AppModule {}

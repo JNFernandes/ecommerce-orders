@@ -4,11 +4,16 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ReadModelConfig } from '../config/configuration';
 import { OrderViewDocument, OrderViewSchema } from './order-view.schema';
 import { ReadModelConnectionMonitor, observeReadModelConnection } from './read-model-connection';
+import { OrderViewRepository } from './order-view.repository';
+import { OrderProjectionService } from './order-projection.service';
 
 /**
  * The CQRS read side (ADR 0001): the MongoDB `order_views` read model and the projection that
- * keeps it up to date from order events. Connects lazily so a MongoDB outage never blocks
- * startup of the HTTP API or the payment consumer.
+ * keeps it up to date from order events (OrderProjectionService → projectOrderEvent →
+ * OrderViewRepository). The Kafka adapter feeding it (OrderProjectionConsumer) is registered in
+ * AppModule with the other consumers, so nothing in src/read-model depends on Kafka or on the
+ * write model. Connects lazily so a MongoDB outage never blocks startup of the HTTP API or the
+ * payment consumer.
  */
 @Module({
   imports: [
@@ -27,7 +32,7 @@ import { ReadModelConnectionMonitor, observeReadModelConnection } from './read-m
     }),
     MongooseModule.forFeature([{ name: OrderViewDocument.name, schema: OrderViewSchema }]),
   ],
-  providers: [ReadModelConnectionMonitor],
-  exports: [],
+  providers: [ReadModelConnectionMonitor, OrderViewRepository, OrderProjectionService],
+  exports: [OrderViewRepository, OrderProjectionService],
 })
 export class ReadModelModule {}

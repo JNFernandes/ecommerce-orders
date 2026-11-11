@@ -119,26 +119,26 @@ schema and module, and message parsing.
 
 ### Tests (write first)
 
-- [ ] T016 [P] [US1] Unit tests in `tests/unit/read-model/order-view.projector.spec.ts` (in-order cases):
+- [X] T016 [P] [US1] Unit tests in `tests/unit/read-model/order-view.projector.spec.ts` (in-order cases):
   - placed on `null` gives a `PENDING` view with every field per data-model.md, item `subtotal` rounded (e.g. `3 × 19.99 = 59.97`, `1 × 0.1 + …` rounding), `placedAt = updatedAt = occurredAt`, `appliedEventIds = [eventId]`, `statusEventId = null`;
   - confirmed on that view gives `CONFIRMED`, `confirmedAt`, `statusEventId`, `updatedAt = max`, and ids sorted;
   - cancelled with a reason gives `CANCELLED`, `cancelledAt` and the reason;
   - cancelled with `reason: ''` stores `''`;
   - cancelled with `reason: null` gives `cancellationReason: null`;
   - the result is `{ kind: 'changed', warnings: [] }`.
-- [ ] T017 [P] [US1] Unit tests in `tests/unit/read-model/order-projection.service.spec.ts` (mock `OrderViewRepository`):
+- [X] T017 [P] [US1] Unit tests in `tests/unit/read-model/order-projection.service.spec.ts` (mock `OrderViewRepository`):
   - no stored view → `insert(view)`;
   - a stored view at revision 3 → `replace(view, 3)`;
   - projector warnings are logged with `logger.warn`;
   - repository errors propagate.
-- [ ] T018 [P] [US1] Integration test in `tests/integration/order-view.repository.integration.spec.ts`. Use `MongoDBContainer('mongo:7')` with `MongooseModule.forRoot(container.getConnectionString(), { directConnection: true })` + `forFeature`. Cover:
+- [X] T018 [P] [US1] Integration test in `tests/integration/order-view.repository.integration.spec.ts`. Use `MongoDBContainer('mongo:7')` with `MongooseModule.forRoot(container.getConnectionString(), { directConnection: true })` + `forFeature`. Cover:
   - `insert` then `findById` round-trips every field, including `null`s, `Date`s and embedded items with no `_id` on items;
   - a second `insert` of the same id throws `OrderViewConcurrencyError`;
   - `replace(view, 1)` → revision 2;
   - `replace(view, 1)` again (stale) throws `OrderViewConcurrencyError`;
   - `findById` of an unknown id → `null`;
   - the stored document has no `__v`, `createdAt` or `updatedAt` added by Mongoose (other than the projector's `updatedAt`).
-- [ ] T019 [US1] Component test in `tests/component/order-projection.component.spec.ts`:
+- [X] T019 [US1] Component test in `tests/component/order-projection.component.spec.ts`:
   - real `PostgreSqlContainer`, `KafkaContainer('confluentinc/cp-kafka:7.6.1')` and `MongoDBContainer('mongo:7')`;
   - create the three `orders.*` topics plus the payment topics;
   - build modules like `tests/component/react-to-payment-outcome.component.spec.ts`, plus `ReadModelModule`, with `MONGO_URI` set to the container URI (with `directConnection=true`) and a unique `KAFKA_PROJECTION_GROUP_ID`;
@@ -148,15 +148,15 @@ schema and module, and message parsing.
 
 ### Implementation
 
-- [ ] T020 [US1] Implement `projectOrderEvent(current: OrderView | null, event: OrderEvent): ProjectionResult` in `src/read-model/order-view.projector.ts` for the **in-order** paths (data-model.md rules: create on placed; terminal on `PENDING`; sorted `appliedEventIds`; `updatedAt` = max). Write it so later stories only add branches. Pure, no I/O. JSDoc the rules table. Makes T016 pass.
-- [ ] T021 [US1] Implement `OrderViewRepository` in `src/read-model/order-view.repository.ts`, injecting `@InjectModel(OrderViewDocument.name)`:
+- [X] T020 [US1] Implement `projectOrderEvent(current: OrderView | null, event: OrderEvent): ProjectionResult` in `src/read-model/order-view.projector.ts` for the **in-order** paths (data-model.md rules: create on placed; terminal on `PENDING`; sorted `appliedEventIds`; `updatedAt` = max). Write it so later stories only add branches. Pure, no I/O. JSDoc the rules table. Makes T016 pass.
+- [X] T021 [US1] Implement `OrderViewRepository` in `src/read-model/order-view.repository.ts`, injecting `@InjectModel(OrderViewDocument.name)`:
   - `findById(orderId): Promise<StoredOrderView | null>` using `lean()`, mapping the document to `OrderView`;
   - `insert(view)`: `create({ _id: orderId, ...view, revision: 1 })`, translating error code `11000` into `OrderViewConcurrencyError`;
   - `replace(view, expectedRevision)`: `replaceOne({ _id, revision: expected }, { ...view, revision: expected + 1 })`, where `matchedCount === 0` throws `OrderViewConcurrencyError`.
 
   Register and export it in `ReadModelModule`. Makes T018 pass.
-- [ ] T022 [US1] Implement `OrderProjectionService.project(event: OrderEvent): Promise<'applied' | 'duplicate'>` in `src/read-model/order-projection.service.ts`: `findById` → `projectOrderEvent` → `insert` or `replace(view, revision)`, log warnings, and return the outcome. Orchestration only. Register and export it in `ReadModelModule`. Makes T017 pass.
-- [ ] T023 [US1] Implement `OrderProjectionConsumer` in `src/infra/kafka/order-projection.consumer.ts`, mirroring `PaymentEventsConsumer`:
+- [X] T022 [US1] Implement `OrderProjectionService.project(event: OrderEvent): Promise<'applied' | 'duplicate'>` in `src/read-model/order-projection.service.ts`: `findById` → `projectOrderEvent` → `insert` or `replace(view, revision)`, log warnings, and return the outcome. Orchestration only. Register and export it in `ReadModelModule`. Makes T017 pass.
+- [X] T023 [US1] Implement `OrderProjectionConsumer` in `src/infra/kafka/order-projection.consumer.ts`, mirroring `PaymentEventsConsumer`:
   - `kafka.consumer({ groupId: projectionGroupId })` created in the constructor;
   - `OnApplicationBootstrap` starts in the background when `consumerEnabled`: subscribe to `ORDER_EVENT_TOPICS` with `fromBeginning: true`, then `run({ autoCommit: false, eachMessage })`;
   - `handleMessage(payload)` delegates to `consumeWithDeadLetter`, with `parse = parseOrderEventMessage`, `describe = { eventId, orderId }` and `handle = (e) => projectionService.project(e)`;
