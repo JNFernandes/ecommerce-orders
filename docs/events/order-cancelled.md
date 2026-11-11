@@ -48,7 +48,8 @@ notification to other systems is delayed.
 
 ## Consumers
 
-- **This service (planned)**: the MongoDB read-model projection (US-05 onwards, see
-  [ADR 0001](../adr/0001-cqrs-read-model-in-orders-service.md)).
+- **This service**: the read-model projection (`OrderProjectionConsumer`, consumer group
+  `ecommerce-orders-projection`, US-05) keeps the MongoDB `order_views` read model up to date.
+  See [read-model.md](../read-model.md).
 - **Other services** (for example Notifications) may consume this topic. Their contracts are out
   of scope here.

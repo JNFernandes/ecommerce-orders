@@ -260,7 +260,7 @@ schema and module, and message parsing.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T037 [P] Create `docs/read-model.md`:
+- [X] T037 [P] Create `docs/read-model.md`:
   - purpose and link to ADR 0001;
   - the document shape (link `specs/003-order-read-model-projection/contracts/order-view-document.md`, with the field table inline);
   - the projection rules (in-order, out-of-order, conflicting terminals, duplicates);
@@ -269,21 +269,21 @@ schema and module, and message parsing.
   - **backfill and rebuild procedure** (reset `ecommerce-orders-projection` to earliest, and optionally drop `order_views` first);
   - **limits**: Kafka's 7-day retention, and orders whose `OrderPlaced` is in `order_dead_letters`;
   - configuration (`MONGO_URI`, `KAFKA_PROJECTION_GROUP_ID`, shared retry settings).
-- [ ] T038 [P] Create `docs/adr/0004-read-model-projection-consistency.md`, following `docs/adr/template.md`. Context: three independent topics and redelivery. Decision: order-independent merge, per-document `appliedEventIds`, deterministic timestamps, optimistic `revision`, outage redelivered vs poison dead-lettered. Consequences: replay-safe rebuilds; the event history bounds backfill. Add it to the index in `docs/adr/README.md`.
-- [ ] T039 [P] Update the "Consumers" sections of `docs/events/order-placed.md`, `order-confirmed.md` and `order-cancelled.md`: the projection (group `ecommerce-orders-projection`) is now **built**, not planned, with a link to `docs/read-model.md`.
-- [ ] T040 [P] Update `README.md`:
+- [X] T038 [P] Create `docs/adr/0004-read-model-projection-consistency.md`, following `docs/adr/template.md`. Context: three independent topics and redelivery. Decision: order-independent merge, per-document `appliedEventIds`, deterministic timestamps, optimistic `revision`, outage redelivered vs poison dead-lettered. Consequences: replay-safe rebuilds; the event history bounds backfill. Add it to the index in `docs/adr/README.md`.
+- [X] T039 [P] Update the "Consumers" sections of `docs/events/order-placed.md`, `order-confirmed.md` and `order-cancelled.md`: the projection (group `ecommerce-orders-projection`) is now **built**, not planned, with a link to `docs/read-model.md`.
+- [X] T040 [P] Update `README.md`:
   - the read path becomes "read model built (US-05), GraphQL planned (US-06/07)";
   - the `orders.*` consumed row becomes **Built**;
   - add `MONGO_URI` and `KAFKA_PROJECTION_GROUP_ID` to the env table, and note that `KAFKA_CONSUMER_ENABLED` and `PAYMENT_CONSUMER_*` apply to both consumers;
   - the tests section mentions the MongoDB container;
   - add a "Read model" link to `docs/read-model.md`.
-- [ ] T041 [P] Update `CLAUDE.md`:
+- [X] T041 [P] Update `CLAUDE.md`:
   - the stack moves the read side from planned to built (projection), with GraphQL still planned;
   - add the `src/read-model/` rule (no imports from `src/domain`, `src/infra/database/entities`, `src/services` or `src/repositories`);
   - add the projection consumer group and the outage-vs-poison rule;
   - add the new env vars.
-- [ ] T042 [P] Update `src/README.md`: add a `read-model/` row to the folder table, add the projection consumer and helper to the `infra/kafka/` row, replace "Read model (planned, not yet built)" with a "Where an order event goes (US-05)" flow line, and update the events table's consumer column.
-- [ ] T043 Run the full quality gate and `npm run test:cov`. Confirm the 80% thresholds on `src/domain`, `src/services` and `src/read-model`, and that the US-04 suites are unchanged and green.
+- [X] T042 [P] Update `src/README.md`: add a `read-model/` row to the folder table, add the projection consumer and helper to the `infra/kafka/` row, replace "Read model (planned, not yet built)" with a "Where an order event goes (US-05)" flow line, and update the events table's consumer column.
+- [X] T043 Run the full quality gate and `npm run test:cov`. Confirm the 80% thresholds on `src/domain`, `src/services` and `src/read-model`, and that the US-04 suites are unchanged and green.
 - [ ] T044 Validate live with `specs/003-order-read-model-projection/quickstart.md`:
   - §2: backfill count equals the Postgres order count (within retention), and a new order shows `PENDING` then `CONFIRMED`/`CANCELLED` within 5s each;
   - §3: snapshot, reset the group to earliest, replay, and diff (no differences);
