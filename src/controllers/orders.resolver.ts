@@ -1,3 +1,4 @@
+import { UseFilters } from '@nestjs/common';
 import { Args, Query, Resolver } from '@nestjs/graphql';
 import { QueryBus } from '@nestjs/cqrs';
 import { OrderType } from '../dto/graphql/order.type';
@@ -6,13 +7,16 @@ import { ListOrdersArgs } from '../dto/graphql/list-orders.args';
 import { ListOrdersQuery } from '../queries/list-orders.query';
 import { ListOrdersResult } from '../services/list-orders.service';
 import { OrderViewFilter } from '../read-model/order-view.repository';
+import { GraphQLUserInputFilter } from '../graphql/graphql-user-input.filter';
 
 /**
  * GraphQL read path (CQRS query side): validates arguments, dispatches exactly one query on the
  * QueryBus and shapes the read-model result into GraphQL types. No business logic, no commands,
- * no write-model access.
+ * no write-model access. Invalid arguments surface as BAD_USER_INPUT and read-model outages as
+ * SERVICE_UNAVAILABLE (GraphQLUserInputFilter).
  */
 @Resolver(() => OrderType)
+@UseFilters(GraphQLUserInputFilter)
 export class OrdersResolver {
   constructor(private readonly queryBus: QueryBus) {}
 

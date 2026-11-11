@@ -294,4 +294,75 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
       );
     });
   });
+
+  describe('invalid requests (US3)', () => {
+    async function errorOf(query: string, variables?: Record<string, unknown>): Promise<GqlError> {
+      const body = await gql<OrdersData>(query, variables);
+      expect(body.errors).toHaveLength(1);
+      expect(body.data ?? null).toBeNull();
+      return (body.errors as GqlError[])[0];
+    }
+
+    it.each([
+      ['limit: 0', 'limit', 'limit must not be less than 1'],
+      ['limit: 101', 'limit', 'limit must not be greater than 100'],
+      ['offset: -1', 'offset', 'offset must not be less than 0'],
+      ['customerId: "abc"', 'customerId', 'customerId must be a UUID'],
+    ])('should answer %s with BAD_USER_INPUT naming %s', async (argList, _arg, message) => {
+      const error = await errorOf(`{ orders(${argList}) { totalCount } }`);
+
+      expect(error.extensions?.code).toBe('BAD_USER_INPUT');
+      expect(error.message).toBe(message);
+      expect(error.extensions?.validationErrors).toEqual([message]);
+    });
+
+    it('should reject an unknown status literal through GraphQL enum validation', async () => {
+      const error = await errorOf('{ orders(status: SHIPPED) { totalCount } }');
+
+      expect(error.extensions?.code).toBe('GRAPHQL_VALIDATION_FAILED');
+      expect(error.message).toContain('SHIPPED');
+      expect(error.message).toContain('OrderStatus');
+    });
+
+    it('should reject an unknown status passed as a variable with BAD_USER_INPUT', async () => {
+      const error = await errorOf(
+        'query ($status: OrderStatus) { orders(status: $status) { totalCount } }',
+        { status: 'SHIPPED' },
+      );
+
+      expect(error.extensions?.code).toBe('BAD_USER_INPUT');
+      expect(error.message).toContain('SHIPPED');
+    });
+
+    it('should keep serving valid queries after invalid ones', async () => {
+      await errorOf('{ orders(limit: 0) { totalCount } }');
+
+      const page = await orders('limit: 1');
+
+      expect(page.items).toHaveLength(1);
+    });
+  });
+});
+
+describe('GraphQL orders query (integration, MongoDB unavailable)', () => {
+  it('should answer SERVICE_UNAVAILABLE without internal details when MongoDB is down', async () => {
+    const container = await new MongoDBContainer('mongo:7').start();
+    const app = await buildGraphqlTestingApp(mongoUri(container.getConnectionString()));
+    await container.stop();
+
+    const response = await request(app.getHttpServer())
+      .post('/graphql')
+      .send({ query: '{ orders { totalCount } }' });
+    const body = response.body as GqlResponse<OrdersData>;
+
+    expect(body.data ?? null).toBeNull();
+    expect(body.errors).toHaveLength(1);
+    const [error] = body.errors as GqlError[];
+    expect(error.message).toBe('Order data is temporarily unavailable, please retry');
+    expect(error.extensions?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(JSON.stringify(body)).not.toMatch(
+      /stacktrace|mongodb:\/\/|ECONNREFUSED|Authentication/i,
+    );
+    await app.close().catch(() => undefined);
+  });
 });

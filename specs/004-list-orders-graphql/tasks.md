@@ -160,13 +160,13 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ### Tests (write first)
 
-- [ ] T024 [P] [US3] Unit tests in `tests/unit/graphql/graphql-user-input.filter.spec.ts`:
+- [X] T024 [P] [US3] Unit tests in `tests/unit/graphql/graphql-user-input.filter.spec.ts`:
   - a `BadRequestException` carrying `message: ['limit must not be greater than 100']` becomes a `GraphQLError` with `extensions.code === 'BAD_USER_INPUT'`, that message, and `extensions.validationErrors` equal to the list;
   - a `BadRequestException` with a string message becomes `BAD_USER_INPUT` too;
   - `ReadModelUnavailableError(new Error('Authentication failed.'))` becomes `SERVICE_UNAVAILABLE` with the generic message, and the output contains no "Authentication" or cause;
   - any other error is rethrown unchanged.
-- [ ] T025 [P] [US3] Unit tests in `tests/unit/dto/list-orders.args.spec.ts` (`plainToInstance` + `validate`): `limit` 0, 101 and 1.5 are invalid; `limit` 1 and 100 are valid; `offset` -1 is invalid and 0 is valid; `customerId` `'abc'` is invalid and a UUID is valid; `status` `'SHIPPED'` is invalid.
-- [ ] T026 [US3] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
+- [X] T025 [P] [US3] Unit tests in `tests/unit/dto/list-orders.args.spec.ts` (`plainToInstance` + `validate`): `limit` 0, 101 and 1.5 are invalid; `limit` 1 and 100 are valid; `offset` -1 is invalid and 0 is valid; `customerId` `'abc'` is invalid and a UUID is valid; `status` `'SHIPPED'` is invalid.
+- [X] T026 [US3] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
   - `limit: 0`, `limit: 101`, `offset: -1` and `customerId: "abc"` each give one error, `extensions.code === 'BAD_USER_INPUT'`, a message containing the argument name, and `data` null;
   - `status: SHIPPED` (literal) gives `GRAPHQL_VALIDATION_FAILED`, and the message lists the allowed values;
   - `status` via a variable `"SHIPPED"` gives `BAD_USER_INPUT`;
@@ -175,7 +175,7 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ### Implementation
 
-- [ ] T027 [US3] Create `GraphQLUserInputFilter` (`@Catch(BadRequestException, ReadModelUnavailableError)`, implementing `GqlExceptionFilter`) in `src/graphql/graphql-user-input.filter.ts`:
+- [X] T027 [US3] Create `GraphQLUserInputFilter` (`@Catch(BadRequestException, ReadModelUnavailableError)`, implementing `GqlExceptionFilter`) in `src/graphql/graphql-user-input.filter.ts`:
   - `BadRequestException`: build `UserInputError` (from `@nestjs/apollo`) with `message = messages.join('; ')` and `extensions.validationErrors = messages`;
   - `ReadModelUnavailableError`: throw `new GraphQLError('Order data is temporarily unavailable, please retry', { extensions: { code: 'SERVICE_UNAVAILABLE' } })`.
 
