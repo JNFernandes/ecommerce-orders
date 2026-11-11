@@ -42,9 +42,10 @@ to other systems is delayed.
 
 ## Consumers
 
-This service has no consumer of its own — it is a Kafka **producer only** (per Constitution
-Principle VII), same as `OrderPlaced`/`OrderCancelled`. A denormalized, query-optimized read
-model of orders is intentionally deferred to a separate future service, which will consume all
-three order topics and own its own database rather than living in this repo. Other bounded
-contexts (inventory, fulfillment, etc.) may also consume this topic; their contracts are out of
-scope for this service.
+- **This service (planned)**: the MongoDB read-model projection (US-05 onwards, see
+  [ADR 0001](../adr/0001-cqrs-read-model-in-orders-service.md)).
+- **Other services** (for example Notifications) may consume this topic. Their contracts are out
+  of scope here.
+
+Since US-04, this event is also emitted when a `payments.payment-processed` event confirms the
+order (see [payment-processed.md](payment-processed.md)), with the same payload.
