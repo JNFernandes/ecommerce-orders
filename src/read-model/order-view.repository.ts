@@ -22,6 +22,9 @@ const CONNECTIVITY_ERROR_NAMES: ReadonlySet<string> = new Set([
 const NOT_CONNECTED_MESSAGE =
   /before initial connection is complete|not connected|connection .*closed/i;
 
+/** How long the reachability check may take before MongoDB is considered unavailable. */
+const PING_TIMEOUT_MS = 2_000;
+
 /** Raw document shape as read back with `lean()`. */
 type StoredDocument = OrderViewDocument;
 
@@ -29,7 +32,8 @@ type StoredDocument = OrderViewDocument;
  * Persists order views in MongoDB (`order_views`). Writes whole documents with optimistic
  * concurrency on `revision`, so applying an event and recording its id is one atomic write.
  * Connectivity failures surface as ReadModelUnavailableError so callers never inspect driver
- * internals.
+ * internals: known connectivity errors are mapped directly, and for any other error the
+ * repository pings MongoDB — if the ping fails, the store is down (not the event at fault).
  */
 @Injectable()
 export class OrderViewRepository {
@@ -44,7 +48,9 @@ export class OrderViewRepository {
    * @throws ReadModelUnavailableError when MongoDB is unreachable.
    */
   async findById(orderId: string): Promise<StoredOrderView | null> {
-    const document = await guard(() => this.model.findById(orderId).lean<StoredDocument>().exec());
+    const document = await this.guard(() =>
+      this.model.findById(orderId).lean<StoredDocument>().exec(),
+    );
     return document ? { view: toView(document), revision: document.revision } : null;
   }
 
@@ -56,7 +62,7 @@ export class OrderViewRepository {
    */
   async insert(view: OrderView): Promise<void> {
     try {
-      await guard(() => this.model.create({ _id: view.orderId, ...view, revision: 1 }));
+      await this.guard(() => this.model.create({ _id: view.orderId, ...view, revision: 1 }));
     } catch (error) {
       if (isDuplicateKey(error)) {
         throw new OrderViewConcurrencyError(view.orderId);
@@ -72,7 +78,7 @@ export class OrderViewRepository {
    * @throws ReadModelUnavailableError when MongoDB is unreachable.
    */
   async replace(view: OrderView, expectedRevision: number): Promise<void> {
-    const result = await guard(() =>
+    const result = await this.guard(() =>
       this.model
         .replaceOne(
           { _id: view.orderId, revision: expectedRevision },
@@ -84,17 +90,45 @@ export class OrderViewRepository {
       throw new OrderViewConcurrencyError(view.orderId);
     }
   }
-}
 
-/** Runs a MongoDB operation, translating connectivity failures into ReadModelUnavailableError. */
-async function guard<T>(operation: () => Promise<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (isConnectivityError(error)) {
-      throw new ReadModelUnavailableError(error);
+  /**
+   * Runs a MongoDB operation, translating outages into ReadModelUnavailableError. Driver errors
+   * during an outage are not always connectivity errors (e.g. a port proxy accepting the TCP
+   * connection makes the handshake fail with "Authentication failed"), so any other error is
+   * double-checked with a ping before it is treated as a real, event-specific failure.
+   */
+  private async guard<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (isConnectivityError(error) || !(await this.isReachable())) {
+        throw new ReadModelUnavailableError(error);
+      }
+      throw error;
     }
-    throw error;
+  }
+
+  /** True when MongoDB answers a ping within PING_TIMEOUT_MS. */
+  private async isReachable(): Promise<boolean> {
+    const connection = this.model.db;
+    if (connection.readyState !== 1 || !connection.db) {
+      return false;
+    }
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        connection.db.admin().command({ ping: 1 }),
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('ping timed out')), PING_TIMEOUT_MS);
+          timer.unref();
+        }),
+      ]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

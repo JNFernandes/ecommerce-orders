@@ -136,6 +136,11 @@ deployable" intent.
 The repository translates driver errors into `ReadModelUnavailableError`, so callers never
 inspect Mongo internals.
 
+*Amended during implementation:* error names alone are not reliable. During a live outage
+(Docker on Windows) the driver reported `MongoServerError: Authentication failed.`, so the
+repository also pings MongoDB on any unrecognised error and classifies the error as an outage if
+the ping fails.
+
 **Rationale**: Dead-lettering is for poison messages. If an outage dead-lettered every event, the
 read model would be left with holes that only US-08 could repair, while Kafka already keeps the
 events for 7 days. The spec's FR-017 was amended during planning to say this. The US-04 payment

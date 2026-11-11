@@ -90,6 +90,14 @@ The projection uses the same consumer flow as the payment consumer (`consumeWith
 | Write conflict, or an unexpected error | retried with exponential backoff, then dead-lettered (`RETRIES_EXHAUSTED`) | committed after the dead-letter write |
 | **MongoDB unreachable** | retried, then **not** dead-lettered: the error is rethrown, kafkajs restarts the consumer, and the event is redelivered | **not** committed |
 
+**How an outage is detected**: known driver connectivity errors (server selection, network,
+not-connected) count as an outage directly. For **any other** error, the repository pings MongoDB
+(2s timeout) and treats the error as an outage if the ping fails. This matters because, during an
+outage, the driver does not always report a network error. With Docker on Windows, a stopped
+container's port can still accept the connection, so the handshake fails with
+`Authentication failed.`. That was found during live validation, where it dead-lettered a healthy
+event before the ping check was added.
+
 A MongoDB outage never affects the HTTP API or the payment consumer. The connection is lazy,
 and `ReadModelConnectionMonitor` keeps retrying the initial connection every 5s until it
 succeeds.

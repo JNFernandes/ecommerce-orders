@@ -284,7 +284,7 @@ schema and module, and message parsing.
   - add the new env vars.
 - [X] T042 [P] Update `src/README.md`: add a `read-model/` row to the folder table, add the projection consumer and helper to the `infra/kafka/` row, replace "Read model (planned, not yet built)" with a "Where an order event goes (US-05)" flow line, and update the events table's consumer column.
 - [X] T043 Run the full quality gate and `npm run test:cov`. Confirm the 80% thresholds on `src/domain`, `src/services` and `src/read-model`, and that the US-04 suites are unchanged and green.
-- [ ] T044 Validate live with `specs/003-order-read-model-projection/quickstart.md`:
+- [X] T044 Validate live with `specs/003-order-read-model-projection/quickstart.md`:
   - §2: backfill count equals the Postgres order count (within retention), and a new order shows `PENDING` then `CONFIRMED`/`CANCELLED` within 5s each;
   - §3: snapshot, reset the group to earliest, replay, and diff (no differences);
   - §4: the malformed and Mongo-outage scenarios.
