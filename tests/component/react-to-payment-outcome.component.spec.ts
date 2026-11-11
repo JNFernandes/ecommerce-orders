@@ -31,6 +31,7 @@ import { OrderRepository } from '../../src/repositories/order.repository';
 import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-letter.repository';
 import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { ProcessedEventRepository } from '../../src/repositories/processed-event.repository';
+import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
@@ -138,6 +139,7 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
         OrderDeadLetterRepository,
         CustomerRepository,
         ProcessedEventRepository,
+        ConsumedMessageDeadLetterRepository,
         OrderEventsProducer,
         PaymentEventsConsumer,
       ],
@@ -297,5 +299,20 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
       eventId,
     ]);
     expect(rows).toHaveLength(1);
+  });
+
+  it('should dead-letter a malformed message and keep processing the next one', async () => {
+    const orderId = await placeOrder();
+
+    await publish(PAYMENT_PROCESSED_TOPIC, 'not json');
+    await publish(PAYMENT_PROCESSED_TOPIC, paymentProcessed(orderId));
+
+    await waitFor(async () => {
+      expect((await orderRow(orderId)).status).toBe('CONFIRMED');
+    });
+    const rows = await dataSource.query(
+      `SELECT "failureType", attempts FROM consumed_message_dead_letters WHERE "rawValue" = 'not json'`,
+    );
+    expect(rows).toEqual([{ failureType: 'MALFORMED', attempts: 1 }]);
   });
 });

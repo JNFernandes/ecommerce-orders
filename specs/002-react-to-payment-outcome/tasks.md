@@ -191,24 +191,24 @@ Conventional Commits scoped `US-04` (e.g. `feat(US-04): add payment reaction pol
 
 ### Tests for User Story 4 (write first)
 
-- [ ] T041 [P] [US4] Unit tests in `tests/unit/infra/retry-with-backoff.spec.ts` (Jest fake timers). Delays follow `min(initial × 2^(n-1), max)` ±20% jitter (inject the random source for determinism). The helper returns on the first success. It rethrows the last error after `maxAttempts`. A non-retryable error (predicate) is thrown immediately with no delay. `heartbeat` is invoked at least every 3s during a long wait. `onRetry` is called with the attempt number and the error.
-- [ ] T042 [P] [US4] Extend `tests/unit/infra/payment-events.consumer.spec.ts`:
+- [X] T041 [P] [US4] Unit tests in `tests/unit/infra/retry-with-backoff.spec.ts` (Jest fake timers). Delays follow `min(initial × 2^(n-1), max)` ±20% jitter (inject the random source for determinism). The helper returns on the first success. It rethrows the last error after `maxAttempts`. A non-retryable error (predicate) is thrown immediately with no delay. `heartbeat` is invoked at least every 3s during a long wait. `onRetry` is called with the attempt number and the error.
+- [X] T042 [P] [US4] Extend `tests/unit/infra/payment-events.consumer.spec.ts`:
   - Malformed: `recordMalformed` is called with `attempts 1`, then commit, with no retry and no dispatch.
   - Dispatch failing `maxAttempts` times: `recordRetriesExhausted` is called with the attempt count, then commit.
   - Dispatch failing once and then succeeding: no dead letter, then commit.
   - Dead-letter repository throwing: no commit, and the error propagates.
   - The log on each retry includes topic, partition, offset, `eventId`, `orderId` and attempt.
-- [ ] T043 [US4] Extend `tests/integration/react-to-payment-outcome.integration.spec.ts` (backoff 1/5 ms, `maxAttempts` 3):
+- [X] T043 [US4] Extend `tests/integration/react-to-payment-outcome.integration.spec.ts` (backoff 1/5 ms, `maxAttempts` 3):
   - An invalid JSON value gives a `consumed_message_dead_letters` row with `failureType MALFORMED`, `rawValue` verbatim, `attempts 1`, and the offset committed.
   - An unknown `orderId` gives a `RETRIES_EXHAUSTED` row with `attempts 3` and `orderId`/`eventId` set.
   - A message whose `aggregateId` is an existing **order** id while `orderId` is random leaves that order untouched and is dead-lettered as unknown.
-- [ ] T044 [US4] Extend `tests/component/react-to-payment-outcome.component.spec.ts`. Produce `not json` followed by a valid payment-processed message for a new order. Assert one `MALFORMED` dead letter and that the valid order still becomes `CONFIRMED`.
+- [X] T044 [US4] Extend `tests/component/react-to-payment-outcome.component.spec.ts`. Produce `not json` followed by a valid payment-processed message for a new order. Assert one `MALFORMED` dead letter and that the valid order still becomes `CONFIRMED`.
 
 ### Implementation for User Story 4
 
-- [ ] T045 [P] [US4] Create `retryWithBackoff<T>(fn, opts: { maxAttempts; initialMs; maxMs; isRetryable(e): boolean; heartbeat?(): Promise<void>; onRetry?(attempt, error, delayMs): void; random?(): number; sleep?(ms): Promise<void> }): Promise<T>` in `src/infra/kafka/retry-with-backoff.ts`. Implement it per research R6, splitting the sleep into ≤3s chunks with `heartbeat` between them. JSDoc. Makes T041 pass.
-- [ ] T046 [P] [US4] Create `ConsumedMessageDeadLetterRepository` in `src/repositories/consumed-message-dead-letter.repository.ts` with `recordMalformed(meta, error)` and `recordRetriesExhausted(meta, error, attempts)`. `meta` holds `topic`, `partition`, `offset`, `messageKey`, `rawValue`, `eventId?` and `orderId?`. `rawValue` is stored as `message.value?.toString('utf8') ?? null`. Register it in `src/app.module.ts` providers.
-- [ ] T047 [US4] Wire failure handling into `PaymentEventsConsumer.handleMessage` in `src/infra/kafka/payment-events.consumer.ts`:
+- [X] T045 [P] [US4] Create `retryWithBackoff<T>(fn, opts: { maxAttempts; initialMs; maxMs; isRetryable(e): boolean; heartbeat?(): Promise<void>; onRetry?(attempt, error, delayMs): void; random?(): number; sleep?(ms): Promise<void> }): Promise<T>` in `src/infra/kafka/retry-with-backoff.ts`. Implement it per research R6, splitting the sleep into ≤3s chunks with `heartbeat` between them. JSDoc. Makes T041 pass.
+- [X] T046 [P] [US4] Create `ConsumedMessageDeadLetterRepository` in `src/repositories/consumed-message-dead-letter.repository.ts` with `recordMalformed(meta, error)` and `recordRetriesExhausted(meta, error, attempts)`. `meta` holds `topic`, `partition`, `offset`, `messageKey`, `rawValue`, `eventId?` and `orderId?`. `rawValue` is stored as `message.value?.toString('utf8') ?? null`. Register it in `src/app.module.ts` providers.
+- [X] T047 [US4] Wire failure handling into `PaymentEventsConsumer.handleMessage` in `src/infra/kafka/payment-events.consumer.ts`:
   - Parse. On `MalformedPaymentMessageError`, call `recordMalformed` (attempts 1), log a warning, and commit.
   - Otherwise wrap the dispatch in `retryWithBackoff` with the config values, `isRetryable = (e) => !(e instanceof MalformedPaymentMessageError)`, `heartbeat` from the payload, and an `onRetry` warning log with topic, partition, offset, `eventId`, `orderId`, attempt and delay.
   - On exhaustion, `recordRetriesExhausted(meta, lastError, maxAttempts)`, log an error, and commit.

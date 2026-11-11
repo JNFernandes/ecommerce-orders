@@ -31,6 +31,7 @@ import { OrderRepository } from '../../src/repositories/order.repository';
 import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-letter.repository';
 import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { ProcessedEventRepository } from '../../src/repositories/processed-event.repository';
+import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
 import { OrderStatusChangedConcurrentlyError } from '../../src/repositories/errors/order-status-changed-concurrently.error';
 import { EventAlreadyProcessedError } from '../../src/services/errors/payment-outcome.errors';
 import { ProcessedEventOutcome } from '../../src/infra/database/entities/processed-event.entity';
@@ -109,6 +110,7 @@ describe('Payment outcome consumer (integration)', () => {
         OrderDeadLetterRepository,
         CustomerRepository,
         ProcessedEventRepository,
+        ConsumedMessageDeadLetterRepository,
         OrderEventsProducer,
         PaymentEventsConsumer,
       ],
@@ -360,6 +362,73 @@ describe('Payment outcome consumer (integration)', () => {
       ]);
       expect(producerSend).not.toHaveBeenCalled();
       expect(commitOffsets).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('failure handling', () => {
+    async function deadLetters(): Promise<
+      Array<{
+        failureType: string;
+        rawValue: string | null;
+        attempts: number;
+        eventId: string | null;
+        orderId: string | null;
+        offset: string;
+      }>
+    > {
+      return dataSource.query(
+        'SELECT "failureType", "rawValue", attempts, "eventId", "orderId", "offset" ' +
+          'FROM consumed_message_dead_letters ORDER BY "createdAt" DESC',
+      );
+    }
+
+    it('should dead-letter an invalid JSON message once, verbatim, and commit', async () => {
+      const payload = payloadFor(PAYMENT_PROCESSED_TOPIC, '{not json');
+
+      await consumer.handleMessage(payload);
+
+      const [row] = await deadLetters();
+      expect(row).toEqual({
+        failureType: 'MALFORMED',
+        rawValue: '{not json',
+        attempts: 1,
+        eventId: null,
+        orderId: null,
+        offset: payload.message.offset,
+      });
+      expect(commitOffsets).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry an unknown orderId, then dead-letter it as RETRIES_EXHAUSTED and commit', async () => {
+      const unknownOrderId = randomUUID();
+      const message = processedMessage(unknownOrderId);
+
+      await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, message));
+
+      const [row] = await deadLetters();
+      expect(row).toMatchObject({
+        failureType: 'RETRIES_EXHAUSTED',
+        attempts: 3,
+        eventId: message.eventId,
+        orderId: unknownOrderId,
+      });
+      expect(await processedRows(message.eventId as string)).toEqual([]);
+      expect(commitOffsets).toHaveBeenCalledTimes(1);
+    });
+
+    it('should never use aggregateId as the order id, even when it matches an existing order', async () => {
+      const existingOrderId = await placeOrder();
+      const message: Record<string, unknown> = {
+        ...processedMessage(randomUUID()),
+        aggregateId: existingOrderId,
+      };
+
+      await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, message));
+
+      expect(await statusOf(existingOrderId)).toBe('PENDING');
+      const [row] = await deadLetters();
+      expect(row).toMatchObject({ failureType: 'RETRIES_EXHAUSTED', eventId: message.eventId });
+      expect(producerSend).not.toHaveBeenCalled();
     });
   });
 
