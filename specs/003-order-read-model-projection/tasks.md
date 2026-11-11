@@ -64,7 +64,7 @@ schema and module, and message parsing.
 
 ### Tests first
 
-- [ ] T005 [P] Unit tests in `tests/unit/infra/consume-with-dead-letter.spec.ts` for the helper from T008, with mocked `deadLetters`, `commit`, `handle` and `parse`:
+- [X] T005 [P] Unit tests in `tests/unit/infra/consume-with-dead-letter.spec.ts` for the helper from T008, with mocked `deadLetters`, `commit`, `handle` and `parse`:
   - parse throws `MalformedMessageError` → `recordMalformed` (with `eventId`/`orderId` from the error), commit, `handle` never called;
   - `handle` succeeds → commit only;
   - `handle` fails once then succeeds → no dead letter, commit;
@@ -73,7 +73,7 @@ schema and module, and message parsing.
   - the dead-letter write throws → rethrows, no commit;
   - a non-`MalformedMessageError` thrown by `parse` → rethrows;
   - the retry log contains topic, partition, offset, `eventId`, `orderId` and `attempt n/max`.
-- [ ] T006 [P] Unit tests in `tests/unit/infra/order-event-message.parser.spec.ts` for `parseOrderEventMessage(topic, value)`:
+- [X] T006 [P] Unit tests in `tests/unit/infra/order-event-message.parser.spec.ts` for `parseOrderEventMessage(topic, value)`:
   - valid placed, confirmed and cancelled payloads (copy the shapes from `docs/events/*.md`) map to the `OrderEvent` variants, with `occurredAt` as a `Date`, `orderId` taken from `aggregateId`, `reason` `null` when absent or `null`, and `""` kept;
   - each of these throws `MalformedMessageError` carrying any readable `eventId`/`aggregateId` as `orderId`:
     - invalid JSON, a `null` value, a JSON array;
@@ -84,28 +84,28 @@ schema and module, and message parsing.
 
 ### Implementation
 
-- [ ] T007 Create `MalformedMessageError` (`message`, optional `eventId`, optional `orderId`) in `src/infra/kafka/malformed-message.error.ts`. Change `MalformedPaymentMessageError` in `src/infra/kafka/payment-message.parser.ts` to `extends MalformedMessageError`, keeping its constructor signature and `name`. All US-04 tests must still pass.
-- [ ] T008 Create `consumeWithDeadLetter<T>(payload: EachMessagePayload, options)` in `src/infra/kafka/consume-with-dead-letter.ts`. The options are `{ parse(topic, value): T; describe(parsed: T): { eventId?: string; orderId?: string }; handle(parsed: T): Promise<unknown>; isFatal?(error): boolean; deadLetters: ConsumedMessageDeadLetterRepository; retry: { maxAttempts; initialMs; maxMs }; commit(): Promise<void>; logger: Logger }`.
+- [X] T007 Create `MalformedMessageError` (`message`, optional `eventId`, optional `orderId`) in `src/infra/kafka/malformed-message.error.ts`. Change `MalformedPaymentMessageError` in `src/infra/kafka/payment-message.parser.ts` to `extends MalformedMessageError`, keeping its constructor signature and `name`. All US-04 tests must still pass.
+- [X] T008 Create `consumeWithDeadLetter<T>(payload: EachMessagePayload, options)` in `src/infra/kafka/consume-with-dead-letter.ts`. The options are `{ parse(topic, value): T; describe(parsed: T): { eventId?: string; orderId?: string }; handle(parsed: T): Promise<unknown>; isFatal?(error): boolean; deadLetters: ConsumedMessageDeadLetterRepository; retry: { maxAttempts; initialMs; maxMs }; commit(): Promise<void>; logger: Logger }`.
   - Move the parse → `retryWithBackoff` (`isRetryable = !(e instanceof MalformedMessageError)`, `heartbeat` from the payload) → dead-letter → commit logic out of `PaymentEventsConsumer.handleMessage`.
   - Add the fatal branch: on `RetriesExhaustedError` whose `lastError` satisfies `isFatal`, log an error and rethrow `lastError` without dead-lettering or committing.
   - JSDoc the flow.
   - Makes T005 pass.
-- [ ] T009 Refactor `PaymentEventsConsumer.handleMessage` in `src/infra/kafka/payment-events.consumer.ts` to delegate to `consumeWithDeadLetter`, with `parse = parsePaymentMessage`, `handle` dispatching `ReactToPaymentOutcomeCommand`, and no `isFatal`. Keep the constructor, the public API and the log text compatible. `tests/unit/infra/payment-events.consumer.spec.ts` and the US-04 integration and component suites MUST pass **unchanged**.
-- [ ] T010 [P] Create the read-side types in `src/read-model/`. None of these files may import from `src/domain/`:
+- [X] T009 Refactor `PaymentEventsConsumer.handleMessage` in `src/infra/kafka/payment-events.consumer.ts` to delegate to `consumeWithDeadLetter`, with `parse = parsePaymentMessage`, `handle` dispatching `ReactToPaymentOutcomeCommand`, and no `isFatal`. Keep the constructor, the public API and the log text compatible. `tests/unit/infra/payment-events.consumer.spec.ts` and the US-04 integration and component suites MUST pass **unchanged**.
+- [X] T010 [P] Create the read-side types in `src/read-model/`. None of these files may import from `src/domain/`:
   - `order-view-status.enum.ts`: `OrderViewStatus` with `PENDING`/`CONFIRMED`/`CANCELLED`.
   - `order-view.ts`: `OrderItemView`, `OrderView` (all fields per data-model.md, `null` for unknown) and `StoredOrderView { view; revision }`.
   - `order-event.ts`: the `OrderEvent` discriminated union (`type: 'OrderPlaced' | 'OrderConfirmed' | 'OrderCancelled'`) with the fields from data-model.md.
   - `errors.ts`: `OrderViewConcurrencyError(orderId)` and `ReadModelUnavailableError(cause)`, each JSDoc'd with its retry semantics.
-- [ ] T011 [P] Unit test `tests/unit/read-model/order-view-status.spec.ts`: `Object.values(OrderViewStatus)` equals `Object.values(OrderStatus)`. This test is the only place the two are compared (Principle II).
-- [ ] T012 [P] Create the message DTOs in `src/read-model/messages/`:
+- [X] T011 [P] Unit test `tests/unit/read-model/order-view-status.spec.ts`: `Object.values(OrderViewStatus)` equals `Object.values(OrderStatus)`. This test is the only place the two are compared (Principle II).
+- [X] T012 [P] Create the message DTOs in `src/read-model/messages/`:
   - `order-placed-message.dto.ts` with a nested `OrderPlacedItemMessageDto`, validated with `@ValidateNested({ each: true }) @Type(() => OrderPlacedItemMessageDto) @IsArray() @ArrayMinSize(1)`;
   - `order-confirmed-message.dto.ts`;
   - `order-cancelled-message.dto.ts`.
 
   Validators per research R9. JSDoc every field, and state in the class doc that these are read-side DTOs, separate from the write-side event classes.
-- [ ] T013 Create `parseOrderEventMessage(topic, value: Buffer | null): OrderEvent` and the topic constant list `ORDER_EVENT_TOPICS` in `src/infra/kafka/order-event-message.parser.ts`. Use `ORDER_PLACED_TOPIC`, `ORDER_CONFIRMED_TOPIC` and `ORDER_CANCELLED_TOPIC` from `order-events.producer.ts`, with JSON → `plainToInstance` → `validateSync` → map to `OrderEvent`. Throw `MalformedMessageError` with readable ids. Makes T006 pass.
-- [ ] T014 Create the Mongoose schema in `src/read-model/order-view.schema.ts`: `OrderViewDocument` with `@Schema({ collection: 'order_views', versionKey: false, timestamps: false })`, `_id: String`, every field from data-model.md (nullable fields `default: null`), and an embedded `OrderItemViewSchema` with `{ _id: false }`.
-- [ ] T015 Create `ReadModelModule` in `src/read-model/read-model.module.ts`. It uses `MongooseModule.forRootAsync({ inject: [ConfigService], useFactory: (c) => ({ uri: c.get('readModel').mongoUri, lazyConnection: true, bufferCommands: false, serverSelectionTimeoutMS: 5000 }) })` plus `MongooseModule.forFeature([{ name: OrderViewDocument.name, schema }])`. Providers and exports are filled in by later tasks. Import `ReadModelModule` in `src/app.module.ts`. Confirm that `npm run start:dev` still boots **with MongoDB stopped** (lazy connection, FR-021), and record the result in the PR notes.
+- [X] T013 Create `parseOrderEventMessage(topic, value: Buffer | null): OrderEvent` and the topic constant list `ORDER_EVENT_TOPICS` in `src/infra/kafka/order-event-message.parser.ts`. Use `ORDER_PLACED_TOPIC`, `ORDER_CONFIRMED_TOPIC` and `ORDER_CANCELLED_TOPIC` from `order-events.producer.ts`, with JSON → `plainToInstance` → `validateSync` → map to `OrderEvent`. Throw `MalformedMessageError` with readable ids. Makes T006 pass.
+- [X] T014 Create the Mongoose schema in `src/read-model/order-view.schema.ts`: `OrderViewDocument` with `@Schema({ collection: 'order_views', versionKey: false, timestamps: false })`, `_id: String`, every field from data-model.md (nullable fields `default: null`), and an embedded `OrderItemViewSchema` with `{ _id: false }`.
+- [X] T015 Create `ReadModelModule` in `src/read-model/read-model.module.ts`. It uses `MongooseModule.forRootAsync({ inject: [ConfigService], useFactory: (c) => ({ uri: c.get('readModel').mongoUri, lazyConnection: true, bufferCommands: false, serverSelectionTimeoutMS: 5000 }) })` plus `MongooseModule.forFeature([{ name: OrderViewDocument.name, schema }])`. Providers and exports are filled in by later tasks. Import `ReadModelModule` in `src/app.module.ts`. Confirm that `npm run start:dev` still boots **with MongoDB stopped** (lazy connection, FR-021), and record the result in the PR notes.
 
 **Checkpoint**: all US-04 tests pass unchanged, the helper and parser tests pass, and the app boots with Mongo up or down.
 

@@ -4,6 +4,7 @@ import { PaymentOutcome } from '../../domain/payment-outcome.enum';
 import { InboundEventRef } from '../../commands/inbound-event-ref';
 import { PaymentProcessedMessageDto } from '../../dto/payment-processed-message.dto';
 import { PaymentFailedMessageDto } from '../../dto/payment-failed-message.dto';
+import { MalformedMessageError } from './malformed-message.error';
 
 export const PAYMENT_PROCESSED_TOPIC = 'payments.payment-processed';
 export const PAYMENT_FAILED_TOPIC = 'payments.payment-failed';
@@ -12,15 +13,9 @@ export const PAYMENT_FAILED_TOPIC = 'payments.payment-failed';
  * A consumed payment message that can never be processed (not JSON, missing or invalid
  * required fields, unsupported version). Not retryable: it is dead-lettered immediately.
  */
-export class MalformedPaymentMessageError extends Error {
-  constructor(
-    message: string,
-    /** The message's `eventId`, if it could be read as a UUID. */
-    public readonly eventId?: string,
-    /** The message's `orderId`, if it could be read as a UUID. */
-    public readonly orderId?: string,
-  ) {
-    super(message);
+export class MalformedPaymentMessageError extends MalformedMessageError {
+  constructor(message: string, eventId?: string, orderId?: string) {
+    super(message, eventId, orderId);
     this.name = 'MalformedPaymentMessageError';
   }
 }
