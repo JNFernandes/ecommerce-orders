@@ -174,3 +174,114 @@ describe('projectOrderEvent — in-order lifecycle', () => {
     expect(pending).toEqual(snapshot);
   });
 });
+
+describe('projectOrderEvent — late and out-of-order events', () => {
+  it('should create a CONFIRMED view from an early OrderConfirmed, without items yet', () => {
+    const { view } = changed(projectOrderEvent(null, confirmed()));
+
+    expect(view).toEqual({
+      orderId: ORDER_ID,
+      customerId: CUSTOMER_ID,
+      status: OrderViewStatus.CONFIRMED,
+      items: null,
+      totalAmount: null,
+      placedAt: null,
+      confirmedAt: T1,
+      cancelledAt: null,
+      cancellationReason: null,
+      updatedAt: T1,
+      appliedEventIds: [confirmed().eventId],
+      statusEventId: confirmed().eventId,
+    });
+  });
+
+  it('should create a CANCELLED view with the reason from an early OrderCancelled', () => {
+    const { view } = changed(projectOrderEvent(null, cancelled()));
+
+    expect(view).toMatchObject({
+      status: OrderViewStatus.CANCELLED,
+      cancelledAt: T2,
+      cancellationReason: 'Amount exceeds threshold',
+      items: null,
+    });
+  });
+
+  it.each([
+    ['CONFIRMED', confirmed()],
+    ['CANCELLED', cancelled()],
+  ])(
+    'should complete a %s view with a late OrderPlaced without reverting its status',
+    (status, terminal) => {
+      const early = fold([terminal]);
+
+      const { view } = changed(projectOrderEvent(early, placed()));
+
+      expect(view.status).toBe(status);
+      expect(view.statusEventId).toBe(terminal.eventId);
+      expect(view.items).toHaveLength(2);
+      expect(view.totalAmount).toBe(60.07);
+      expect(view.placedAt).toEqual(T0);
+      expect(view.updatedAt).toEqual(terminal.occurredAt);
+    },
+  );
+
+  it.each([
+    ['placed + confirmed', [placed(), confirmed()]],
+    ['placed + cancelled', [placed(), cancelled()]],
+    ['placed + cancelled without reason', [placed(), cancelled({ reason: null })]],
+  ])('should produce the same view for both arrival orders of %s', (_label, events) => {
+    expect(fold([...events].reverse())).toEqual(fold(events));
+  });
+
+  describe('conflicting terminal events (never produced by the write side)', () => {
+    const earlyConfirm = confirmed({ occurredAt: T1 });
+    const lateCancel = cancelled({ occurredAt: T2 });
+
+    it.each([
+      ['confirm first', [placed(), earlyConfirm, lateCancel]],
+      ['cancel first', [placed(), lateCancel, earlyConfirm]],
+      ['cancel, placed, confirm', [lateCancel, placed(), earlyConfirm]],
+    ])('should keep the terminal event that occurred first (%s)', (_label, events) => {
+      const view = fold(events);
+
+      expect(view).toMatchObject({
+        status: OrderViewStatus.CONFIRMED,
+        confirmedAt: T1,
+        cancelledAt: null,
+        cancellationReason: null,
+        statusEventId: earlyConfirm.eventId,
+        updatedAt: T2,
+      });
+      expect(view.appliedEventIds).toHaveLength(3);
+    });
+
+    it('should report a warning naming both events when the later terminal loses', () => {
+      const result = changed(projectOrderEvent(fold([placed(), earlyConfirm]), lateCancel));
+
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain(earlyConfirm.eventId);
+      expect(result.warnings[0]).toContain(lateCancel.eventId);
+    });
+
+    it('should report a warning naming both events when an earlier terminal replaces the status', () => {
+      const result = changed(projectOrderEvent(fold([placed(), lateCancel]), earlyConfirm));
+
+      expect(result.view.status).toBe(OrderViewStatus.CONFIRMED);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain(earlyConfirm.eventId);
+      expect(result.warnings[0]).toContain(lateCancel.eventId);
+    });
+
+    it('should break an occurredAt tie with the smaller eventId, in both arrival orders', () => {
+      const a = confirmed({ eventId: '0aaaaaaa-0000-4000-8000-000000000000', occurredAt: T1 });
+      const b = cancelled({ eventId: '0bbbbbbb-0000-4000-8000-000000000000', occurredAt: T1 });
+
+      const ab = fold([placed(), a, b]);
+      const ba = fold([placed(), b, a]);
+
+      expect(ab).toEqual(ba);
+      expect(ab.status).toBe(OrderViewStatus.CONFIRMED);
+      expect(ab.statusEventId).toBe(a.eventId);
+    });
+  });
+});

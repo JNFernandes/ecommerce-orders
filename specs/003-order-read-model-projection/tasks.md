@@ -177,21 +177,21 @@ schema and module, and message parsing.
 
 ### Tests (write first)
 
-- [ ] T024 [P] [US2] Extend `tests/unit/read-model/order-view.projector.spec.ts`:
+- [X] T024 [P] [US2] Extend `tests/unit/read-model/order-view.projector.spec.ts`:
   - confirmed on `null` → `CONFIRMED`, `customerId` set, `items`/`totalAmount`/`placedAt` `null`;
   - cancelled on `null` similarly, with the reason;
   - placed on a `CONFIRMED` (or `CANCELLED`) view → items, total and `placedAt` filled in, status unchanged, `confirmedAt` kept;
   - **permutation property**: for every permutation of {placed, confirmed} and {placed, cancelled}, folding the events gives deep-equal views;
   - **conflict**: confirmed(t1) + cancelled(t2>t1) in both orders → `CONFIRMED`/`confirmedAt=t1`/`cancelledAt=null`/`cancellationReason=null`, with one warning returned;
   - **tie**: equal `occurredAt` → the smaller `eventId` wins, in both orders.
-- [ ] T025 [US2] Integration test in `tests/integration/order-projection.integration.spec.ts` (`MongoDBContainer`, real `OrderViewRepository` + `OrderProjectionService`):
+- [X] T025 [US2] Integration test in `tests/integration/order-projection.integration.spec.ts` (`MongoDBContainer`, real `OrderViewRepository` + `OrderProjectionService`):
   - apply placed→confirmed for order A and confirmed→placed for an identical order B (same events, different `orderId`);
   - compare the stored documents, ignoring `_id`/`orderId`;
   - also cover cancelled-first with a reason.
 
 ### Implementation
 
-- [ ] T026 [US2] Extend `projectOrderEvent` in `src/read-model/order-view.projector.ts`:
+- [X] T026 [US2] Extend `projectOrderEvent` in `src/read-model/order-view.projector.ts`:
   - create a view from a terminal event when `current` is `null`;
   - a placed event on an existing view fills in data without touching `status`, `statusEventId` or the terminal timestamps;
   - terminal-vs-terminal resolution by `(occurredAt, eventId)`, clearing the loser's timestamp and reason and returning a warning naming both event ids.

@@ -74,15 +74,35 @@ function applyPlaced(view: OrderView, event: OrderPlacedEvent): OrderView {
   };
 }
 
+/**
+ * Sets the terminal status, or — when one is already set (never produced by the write side,
+ * which allows one transition from PENDING) — keeps whichever terminal event occurred first
+ * (earlier `occurredAt`, then smaller `eventId`), so the result does not depend on arrival order.
+ */
 function applyTerminal(view: OrderView, event: TerminalEvent, warnings: string[]): OrderView {
-  if (view.statusEventId !== null) {
-    warnings.push(
-      `order ${view.orderId}: ignoring ${event.type} ${event.eventId}; ` +
-        `status already decided by ${view.statusEventId} (${view.status})`,
-    );
-    return view;
+  if (view.statusEventId === null) {
+    return withTerminal(view, event);
   }
-  return withTerminal(view, event);
+
+  const winnerAt = view.confirmedAt ?? view.cancelledAt;
+  const challengerIsEarlier =
+    winnerAt === null ||
+    event.occurredAt < winnerAt ||
+    (event.occurredAt.getTime() === winnerAt.getTime() && event.eventId < view.statusEventId);
+
+  if (challengerIsEarlier) {
+    warnings.push(
+      `order ${view.orderId}: conflicting terminal events; ${event.type} ${event.eventId} ` +
+        `occurred before ${view.statusEventId} (${view.status}) and now decides the status`,
+    );
+    return withTerminal(view, event);
+  }
+
+  warnings.push(
+    `order ${view.orderId}: conflicting terminal events; ignoring ${event.type} ${event.eventId}, ` +
+      `status already decided by earlier ${view.statusEventId} (${view.status})`,
+  );
+  return view;
 }
 
 function withTerminal(view: OrderView, event: TerminalEvent): OrderView {
