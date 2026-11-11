@@ -90,37 +90,37 @@ dispatches only `ListOrdersQuery` and never touches the `CommandBus`.
 
 ### Tests (write first)
 
-- [ ] T011 [P] [US1] Unit tests in `tests/unit/services/list-orders.service.spec.ts` (mock `OrderViewRepository.list`):
+- [X] T011 [P] [US1] Unit tests in `tests/unit/services/list-orders.service.spec.ts` (mock `OrderViewRepository.list`):
   - `filter` and `page` are passed through unchanged;
   - `hasNextPage` for: an empty result (total 0); an exact last page (offset 4, 1 item, total 5 → false); a partial page with more left (offset 0, 2 items, total 5 → true); an offset beyond the end (offset 10, 0 items, total 5 → false);
   - repository errors propagate.
-- [ ] T012 [P] [US1] Unit tests in `tests/unit/controllers/orders.resolver.spec.ts` (mock `QueryBus`):
+- [X] T012 [P] [US1] Unit tests in `tests/unit/controllers/orders.resolver.spec.ts` (mock `QueryBus`):
   - `orders(args)` executes exactly one `ListOrdersQuery` with `{ status, customerId }` and `{ limit, offset }` from the args;
   - it maps the result to `OrdersPageType` through `OrderType.fromView`, so bookkeeping fields are absent;
   - the resolver has no `CommandBus` dependency (assert the constructor parameter metadata or `Object.keys` of its injected deps).
-- [ ] T013 [US1] Integration test in `tests/integration/list-orders.graphql.integration.spec.ts`:
+- [X] T013 [US1] Integration test in `tests/integration/list-orders.graphql.integration.spec.ts`:
   - **Setup**: `MongoDBContainer('mongo:7')`. Build the testing module with `ConfigModule` (configuration), `CqrsModule.forRoot()`, `GraphQLModule.forRootAsync` using the **same** options factory as the app (`src/graphql/graphql.config.ts`), and a `ReadModelModule`-equivalent (Mongoose to the container plus `OrderViewRepository`), plus `OrdersResolver` and `ListOrdersService`. Call `configureApp(app)` and `ensureIndexes()`. Seed views with `OrderViewRepository.insert`. Add a `gql(query, variables?)` helper posting to `/graphql` with Supertest.
   - **US1 cases**: the default call returns ≤ 20 items newest first, with correct `totalCount`; ties on `placedAt` are ordered by `orderId` desc; a view with `placedAt: null` comes last with `items`/`totalAmount`/`placedAt` null; paging `limit: 2` across all pages yields every order exactly once; `hasNextPage` is correct on each page; an offset past the end gives empty `items` with the correct `totalCount`; every exposed field round-trips (dates as ISO strings); bookkeeping fields are not queryable (asking for `revision` gives `GRAPHQL_VALIDATION_FAILED`).
-- [ ] T014 [US1] Component test in `tests/component/list-orders.component.spec.ts`:
+- [X] T014 [US1] Component test in `tests/component/list-orders.component.spec.ts`:
   - **Setup**: real PostgreSQL, Kafka (create the `orders.*` topics) and MongoDB containers. Module set as in `tests/component/order-projection.component.spec.ts`, plus `GraphQLModule` (same factory), `OrdersResolver`, `ListOrdersService` and `configureApp`.
   - **Case**: place 2 orders via `POST /orders`, then poll `orders(limit: 10)` over GraphQL (≤ 30s) until both appear as `PENDING` with correct items, `totalAmount` and `placedAt`, the newest first. Then `POST /orders/:id/confirm` one of them and poll until the query shows `CONFIRMED` with `confirmedAt`.
 
 ### Implementation
 
-- [ ] T015 [US1] Add `list(filter: OrderViewFilter, page: PageRequest): Promise<OrderViewPage>` and the exported types `OrderViewFilter`/`PageRequest`/`OrderViewPage` to `src/read-model/order-view.repository.ts`:
+- [X] T015 [US1] Add `list(filter: OrderViewFilter, page: PageRequest): Promise<OrderViewPage>` and the exported types `OrderViewFilter`/`PageRequest`/`OrderViewPage` to `src/read-model/order-view.repository.ts`:
   - `find(filter).sort({ placedAt: -1, _id: -1 }).skip(offset).limit(limit).lean()` and `countDocuments(filter)` in `Promise.all`, inside `guard`;
   - map documents with the existing `toView`;
   - build the filter only from defined keys.
 
   Extend `tests/integration/order-view.repository.integration.spec.ts` with sort, tie-break, nulls-last and paging cases.
-- [ ] T016 [US1] Create `ListOrdersQuery(filter: OrderViewFilter, page: PageRequest)` in `src/queries/list-orders.query.ts`, and `ListOrdersService` (`@QueryHandler(ListOrdersQuery)`, `ListOrdersResult { views, totalCount, hasNextPage }`) in `src/services/list-orders.service.ts`. JSDoc both. Makes T011 pass.
-- [ ] T017 [US1] Create `ListOrdersArgs` (`@ArgsType()`) in `src/dto/graphql/list-orders.args.ts` with `limit` (`@Field(() => Int, { defaultValue: 20, description })`, `@IsInt() @Min(1) @Max(100)`) and `offset` (`@Field(() => Int, { defaultValue: 0, description })`, `@IsInt() @Min(0)`). Filters are added in US2.
-- [ ] T018 [US1] Create `OrdersResolver` in `src/controllers/orders.resolver.ts`:
+- [X] T016 [US1] Create `ListOrdersQuery(filter: OrderViewFilter, page: PageRequest)` in `src/queries/list-orders.query.ts`, and `ListOrdersService` (`@QueryHandler(ListOrdersQuery)`, `ListOrdersResult { views, totalCount, hasNextPage }`) in `src/services/list-orders.service.ts`. JSDoc both. Makes T011 pass.
+- [X] T017 [US1] Create `ListOrdersArgs` (`@ArgsType()`) in `src/dto/graphql/list-orders.args.ts` with `limit` (`@Field(() => Int, { defaultValue: 20, description })`, `@IsInt() @Min(1) @Max(100)`) and `offset` (`@Field(() => Int, { defaultValue: 0, description })`, `@IsInt() @Min(0)`). Filters are added in US2.
+- [X] T018 [US1] Create `OrdersResolver` in `src/controllers/orders.resolver.ts`:
   - `@Resolver(() => OrderType)` with `@Query(() => OrdersPageType, { name: 'orders', description })`, `orders(@Args() args: ListOrdersArgs)`;
   - `queryBus.execute(new ListOrdersQuery(...))`, then map with `OrderType.fromView`.
 
   Makes T012 pass.
-- [ ] T019 [US1] Create the Apollo options factory `buildGraphqlOptions(config: ConfigService): ApolloDriverConfig` in `src/graphql/graphql.config.ts`: `autoSchemaFile: true`, `sortSchema: true`, `path: '/graphql'`, `playground: false`, `introspection: devTools`, `plugins: devTools ? [ApolloServerPluginLandingPageLocalDefault({ embed: true })] : []`. Register `GraphQLModule.forRootAsync<ApolloDriverConfig>({ driver: ApolloDriver, inject: [ConfigService], useFactory: buildGraphqlOptions })`, `OrdersResolver` and `ListOrdersService` in `src/app.module.ts`. Makes T013 (US1 cases) and T014 pass.
+- [X] T019 [US1] Create the Apollo options factory `buildGraphqlOptions(config: ConfigService): ApolloDriverConfig` in `src/graphql/graphql.config.ts`: `autoSchemaFile: true`, `sortSchema: true`, `path: '/graphql'`, `playground: false`, `introspection: devTools`, `plugins: devTools ? [ApolloServerPluginLandingPageLocalDefault({ embed: true })] : []`. Register `GraphQLModule.forRootAsync<ApolloDriverConfig>({ driver: ApolloDriver, inject: [ConfigService], useFactory: buildGraphqlOptions })`, `OrdersResolver` and `ListOrdersService` in `src/app.module.ts`. Makes T013 (US1 cases) and T014 pass.
 
 **Checkpoint**: MVP. Orders can be listed and paged over GraphQL from the read model.
 
