@@ -8,7 +8,8 @@ Orders microservice: NestJS + TypeScript, DDD, CQRS. The source of truth for eve
 - NestJS 10, TypeScript (strict, `any` banned), `@nestjs/cqrs`
 - Write side: REST + Swagger, TypeORM + PostgreSQL
 - Read side: MongoDB read model `order_views` via `@nestjs/mongoose` (US-05), served by a
-  code-first Apollo GraphQL API at `/graphql` (`orders` query, US-06; order by id planned, US-07)
+  code-first Apollo GraphQL API at `/graphql`: `orders` (paged list, US-06) and `order(orderId)`
+  (by id, US-07)
 - Kafka via `kafkajs`
 - Jest, Supertest, `@nestjs/testing`, testcontainers
 - Local infra comes from the `ecommerce-infra` repo (`docker compose up -d` there): Kafka
@@ -56,6 +57,8 @@ warning (`--max-warnings 0`), or a formatting violation.
   dispatch queries only (never the `CommandBus`); query handlers never read Postgres; GraphQL
   types live in `src/dto/graphql/`, are built from `OrderView` (never TypeORM entities or the
   `Order` aggregate) and never expose read-model bookkeeping (`appliedEventIds`, `revision`, …).
+- "Not found" is not an error: `order(orderId)` returns `null` with no `errors` entry. Nullable
+  fields that fail also come back `null`, so clients tell failures apart by the `errors` entry.
 - GraphQL errors: validation → `BAD_USER_INPUT`, read model down → `SERVICE_UNAVAILABLE`
   (`src/graphql/graphql-user-input.filter.ts`, applied with `@UseFilters` on resolvers).
 - A request handler issues a command **or** a query, never both.

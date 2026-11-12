@@ -8,6 +8,7 @@ import request from 'supertest';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { KafkaContainer, StartedKafkaContainer } from '@testcontainers/kafka';
 import { Consumer, Kafka, Producer } from 'kafkajs';
+import { createTopicsWhenReady } from './support/kafka-testing';
 import configuration from '../../src/config/configuration';
 import { KafkaModule } from '../../src/infra/kafka/kafka.module';
 import { KAFKA_PRODUCER } from '../../src/infra/kafka/kafka.constants';
@@ -111,7 +112,9 @@ describe('Confirm Order — full write flow (component)', () => {
     const observerKafka = new Kafka({ clientId: 'test-observer', brokers: [kafkaBroker] });
     const admin = observerKafka.admin();
     await admin.connect();
-    await admin.createTopics({ topics: [{ topic: ORDER_CONFIRMED_TOPIC, numPartitions: 1 }] });
+    await createTopicsWhenReady(admin, {
+      topics: [{ topic: ORDER_CONFIRMED_TOPIC, numPartitions: 1 }],
+    });
     await admin.disconnect();
 
     observerConsumer = observerKafka.consumer({ groupId: 'test-observer-group' });

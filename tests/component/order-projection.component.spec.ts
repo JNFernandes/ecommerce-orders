@@ -12,6 +12,7 @@ import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers
 import { KafkaContainer, StartedKafkaContainer } from '@testcontainers/kafka';
 import { MongoDBContainer, StartedMongoDBContainer } from '@testcontainers/mongodb';
 import { Kafka, Producer } from 'kafkajs';
+import { createTopicsWhenReady } from './support/kafka-testing';
 import configuration from '../../src/config/configuration';
 import { KafkaModule } from '../../src/infra/kafka/kafka.module';
 import {
@@ -98,7 +99,7 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
     const testKafka = new Kafka({ clientId: 'test-harness', brokers: [kafkaBroker] });
     const admin = testKafka.admin();
     await admin.connect();
-    await admin.createTopics({
+    await createTopicsWhenReady(admin, {
       waitForLeaders: true,
       topics: [ORDER_PLACED_TOPIC, ORDER_CONFIRMED_TOPIC, ORDER_CANCELLED_TOPIC].map((topic) => ({
         topic,

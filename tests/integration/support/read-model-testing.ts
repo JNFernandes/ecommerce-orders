@@ -10,6 +10,7 @@ import { configureApp } from '../../../src/app.setup';
 import { buildGraphqlOptions } from '../../../src/graphql/graphql.config';
 import { OrdersResolver } from '../../../src/controllers/orders.resolver';
 import { ListOrdersService } from '../../../src/services/list-orders.service';
+import { GetOrderService } from '../../../src/services/get-order.service';
 import { OrderViewRepository } from '../../../src/read-model/order-view.repository';
 import { OrderViewDocument, OrderViewSchema } from '../../../src/read-model/order-view.schema';
 import { OrderProjectionService } from '../../../src/read-model/order-projection.service';
@@ -70,7 +71,7 @@ export async function buildGraphqlTestingApp(uri: string): Promise<INestApplicat
       }),
       MongooseModule.forFeature([{ name: OrderViewDocument.name, schema: OrderViewSchema }]),
     ],
-    providers: [OrderViewRepository, OrdersResolver, ListOrdersService],
+    providers: [OrderViewRepository, OrdersResolver, ListOrdersService, GetOrderService],
   }).compile();
 
   const app = moduleRef.createNestApplication();

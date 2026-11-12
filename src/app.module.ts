@@ -29,6 +29,7 @@ import { ReadModelModule } from './read-model/read-model.module';
 import { buildGraphqlOptions } from './graphql/graphql.config';
 import { OrdersResolver } from './controllers/orders.resolver';
 import { ListOrdersService } from './services/list-orders.service';
+import { GetOrderService } from './services/get-order.service';
 
 @Module({
   imports: [
@@ -84,6 +85,7 @@ import { ListOrdersService } from './services/list-orders.service';
     PaymentEventsConsumer,
     OrderProjectionConsumer,
     ListOrdersService,
+    GetOrderService,
     OrdersResolver,
   ],
 })

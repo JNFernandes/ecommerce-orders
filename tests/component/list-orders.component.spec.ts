@@ -12,6 +12,7 @@ import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers
 import { KafkaContainer, StartedKafkaContainer } from '@testcontainers/kafka';
 import { MongoDBContainer, StartedMongoDBContainer } from '@testcontainers/mongodb';
 import { Kafka } from 'kafkajs';
+import { createTopicsWhenReady } from './support/kafka-testing';
 import configuration from '../../src/config/configuration';
 import { configureApp } from '../../src/app.setup';
 import { buildGraphqlOptions } from '../../src/graphql/graphql.config';
@@ -37,6 +38,7 @@ import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
 import { ListOrdersService } from '../../src/services/list-orders.service';
+import { GetOrderService } from '../../src/services/get-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { OrdersResolver } from '../../src/controllers/orders.resolver';
 import { ReadModelModule } from '../../src/read-model/read-model.module';
@@ -101,7 +103,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
 
     const admin = new Kafka({ clientId: 'test-harness', brokers: [kafkaBroker] }).admin();
     await admin.connect();
-    await admin.createTopics({
+    await createTopicsWhenReady(admin, {
       waitForLeaders: true,
       topics: [ORDER_PLACED_TOPIC, ORDER_CONFIRMED_TOPIC, ORDER_CANCELLED_TOPIC].map((topic) => ({
         topic,
@@ -146,6 +148,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
         ConfirmOrderService,
         CancelOrderService,
         ListOrdersService,
+        GetOrderService,
         OrdersResolver,
         OrderRepository,
         OrderDeadLetterRepository,
@@ -249,5 +252,47 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
       expect(cancelled.totalCount).toBe(1);
       expect(cancelled.items[0].cancelledAt).toEqual(expect.any(String));
     });
+  });
+
+  async function getOrder(orderId: string): Promise<ListedOrder | null> {
+    const response = await request(app.getHttpServer())
+      .post('/graphql')
+      .send({
+        query: `query ($id: ID!) { order(orderId: $id) {
+          orderId customerId status totalAmount placedAt confirmedAt cancelledAt
+          items { productId quantity subtotal } } }`,
+        variables: { id: orderId },
+      });
+    expect(response.body.errors).toBeUndefined();
+    return response.body.data.order as ListedOrder | null;
+  }
+
+  it('should fetch a placed order by id, then show its confirmation', async () => {
+    const orderId = await placeOrder(CUSTOMER_A, 12.5);
+
+    const placed = await waitFor(async () => {
+      const found = await getOrder(orderId);
+      expect(found?.status).toBe('PENDING');
+      return found as ListedOrder;
+    });
+    expect(placed).toMatchObject({
+      orderId,
+      customerId: CUSTOMER_A,
+      totalAmount: 25,
+      items: [{ productId: 'p-1', quantity: 2, subtotal: 25 }],
+    });
+
+    const confirm = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    expect(confirm.status).toBe(200);
+
+    await waitFor(async () => {
+      const found = await getOrder(orderId);
+      expect(found?.status).toBe('CONFIRMED');
+      expect(found?.confirmedAt).toEqual(expect.any(String));
+    });
+  });
+
+  it('should return null for an order id that does not exist', async () => {
+    expect(await getOrder(randomUUID())).toBeNull();
   });
 });

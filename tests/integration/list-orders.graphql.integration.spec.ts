@@ -215,6 +215,85 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
     });
   });
 
+  describe('order by id (US7)', () => {
+    const ORDER_QUERY = `query ($id: ID!) { order(orderId: $id) { ${ORDER_FIELDS} } }`;
+
+    async function order(id: string): Promise<GqlResponse<{ order: OrderResult | null }>> {
+      return gql<{ order: OrderResult | null }>(ORDER_QUERY, { id });
+    }
+
+    it('should return the order with exactly the values the list shows for it', async () => {
+      const fromList = (await orders('limit: 1, offset: 3')).items[0];
+
+      const body = await order(fromList.orderId);
+
+      expect(body.errors).toBeUndefined();
+      expect(body.data?.order).toEqual(fromList);
+    });
+
+    it('should return an order known only from a terminal event with null placement data', async () => {
+      const body = await order(orderId(8));
+
+      expect(body.data?.order).toMatchObject({
+        orderId: orderId(8),
+        status: 'CONFIRMED',
+        items: null,
+        totalAmount: null,
+        placedAt: null,
+      });
+    });
+
+    it('should find the order when the id is given in uppercase', async () => {
+      const body = await order(orderId(5).toUpperCase());
+
+      expect(body.data?.order?.orderId).toBe(orderId(5));
+    });
+
+    it('should return null with no errors entry for an unknown order id', async () => {
+      const body = await order('99999999-9999-4999-8999-999999999999');
+
+      expect(body).toEqual({ data: { order: null } });
+    });
+
+    it('should reject a malformed id with BAD_USER_INPUT naming orderId', async () => {
+      const body = await gql<{ order: OrderResult | null }>(
+        '{ order(orderId: "abc") { orderId } }',
+      );
+
+      expect(body.errors).toHaveLength(1);
+      const [error] = body.errors as GqlError[];
+      expect(error.extensions?.code).toBe('BAD_USER_INPUT');
+      expect(error.message).toBe('orderId must be a UUID');
+      expect(error.extensions?.validationErrors).toEqual(['orderId must be a UUID']);
+      expect(body.data).toEqual({ order: null });
+    });
+
+    it('should reject a query without orderId through GraphQL validation', async () => {
+      const body = await gql('{ order { orderId } }');
+
+      expect(body.errors?.[0].extensions?.code).toBe('GRAPHQL_VALIDATION_FAILED');
+      expect(body.errors?.[0].message).toContain('orderId');
+    });
+
+    it('should keep answering valid lookups after a malformed one', async () => {
+      await gql('{ order(orderId: "abc") { orderId } }');
+
+      const body = await order(orderId(5));
+
+      expect(body.errors).toBeUndefined();
+      expect(body.data?.order?.orderId).toBe(orderId(5));
+    });
+
+    it('should return a cancelled order with its cancellation reason', async () => {
+      const body = await order(orderId(9));
+
+      expect(body.data?.order).toMatchObject({
+        status: 'CANCELLED',
+        cancellationReason: 'Amount exceeds threshold',
+      });
+    });
+  });
+
   describe('filtering (US2)', () => {
     it('should return only orders in the requested status', async () => {
       const page = await orders('status: CANCELLED');
@@ -363,6 +442,25 @@ describe('GraphQL orders query (integration, MongoDB unavailable)', () => {
     expect(JSON.stringify(body)).not.toMatch(
       /stacktrace|mongodb:\/\/|ECONNREFUSED|Authentication/i,
     );
+    await app.close().catch(() => undefined);
+  });
+
+  it('should answer an order lookup during an outage with a SERVICE_UNAVAILABLE error, not a silent null', async () => {
+    const container = await new MongoDBContainer('mongo:7').start();
+    const app = await buildGraphqlTestingApp(mongoUri(container.getConnectionString(), 'outage2'));
+    await container.stop();
+
+    const response = await request(app.getHttpServer())
+      .post('/graphql')
+      .send({ query: '{ order(orderId: "99999999-9999-4999-8999-999999999999") { orderId } }' });
+    const body = response.body as GqlResponse<{ order: OrderResult | null }>;
+
+    // `order` is nullable, so GraphQL nulls just that field — what distinguishes an outage from
+    // "not found" is the errors entry (a not-found answer has none).
+    expect(body.data).toEqual({ order: null });
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors?.[0].extensions?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(body.errors?.[0].message).toBe('Order data is temporarily unavailable, please retry');
     await app.close().catch(() => undefined);
   });
 });

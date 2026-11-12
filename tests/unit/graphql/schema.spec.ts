@@ -70,6 +70,10 @@ describe('GraphQL schema', () => {
     expect(undescribed(await buildOrdersSchema())).toEqual([]);
   });
 
+  it('should expose the nullable order(orderId: ID!) query', () => {
+    expect(printed).toMatch(/\border\(\s*"""[^"]*"""\s*orderId: ID!\s*\): Order\n/);
+  });
+
   it('should expose the orders query with its arguments and defaults', () => {
     expect(printed).toMatch(
       /orders\(\s*"""[^"]*"""\s*customerId: ID[\s\S]*limit: Int! = 20[\s\S]*offset: Int! = 0[\s\S]*status: OrderStatus\s*\): OrdersPage!/,

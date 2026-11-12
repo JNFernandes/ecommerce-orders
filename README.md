@@ -35,7 +35,8 @@ See [`src/README.md`](src/README.md) for the folder layout.
 - **Read path (built, US-06)**: GraphQL `orders` query → query bus → `ListOrdersService` →
   that **MongoDB** read model. It never touches PostgreSQL and is eventually consistent with the
   write side. See [GraphQL](#graphql-read-path) and
-  [ADR 0001](docs/adr/0001-cqrs-read-model-in-orders-service.md). Order-by-id is planned (US-07).
+  [ADR 0001](docs/adr/0001-cqrs-read-model-in-orders-service.md). Queries: `orders` (list, US-06)
+  and `order` (by id, US-07).
 
 ### Events
 
@@ -90,6 +91,10 @@ introspection and the sandbox are off. The schema is committed in
 (`limit` 1–100, `offset` ≥ 0; `status` and `customerId` are optional and combine with AND), plus
 `totalCount` and `hasNextPage`.
 
+`order(orderId: ID!): Order` returns one order by id (any letter case), or `null` when no order
+has that id. A just-placed order may briefly return `null` until it has been projected. "Not
+found" is **not** an error: the response has no `errors` entry.
+
 ### Example GraphQL queries
 
 Newest orders:
@@ -121,6 +126,26 @@ One customer's orders, second page of 10:
   }
 }
 ```
+
+One order by id (variables shown as in Postman or the Sandbox):
+
+```graphql
+query GetOrder($orderId: ID!) {
+  order(orderId: $orderId) {
+    orderId status totalAmount placedAt confirmedAt cancelledAt cancellationReason
+    items { productId quantity unitPrice subtotal }
+  }
+}
+```
+
+```json
+{ "orderId": "4889fbea-c49f-4094-8ca9-45d79508477e" }
+```
+
+An unknown id returns `{ "data": { "order": null } }` with no `errors`. A malformed id
+(`order(orderId: "abc")`) returns `BAD_USER_INPUT` with `orderId must be a UUID`. Because `order`
+is nullable, a failed lookup also comes back as `"data": { "order": null }`, so **check `errors`
+first**: its presence is what separates a failure from "not found".
 
 From the command line:
 
