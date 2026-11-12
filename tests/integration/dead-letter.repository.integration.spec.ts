@@ -242,4 +242,127 @@ describe('Dead-letter retry bookkeeping (integration, PostgreSQL)', () => {
       expect(row.status).toBe(DeadLetterStatus.EXHAUSTED);
     });
   });
+
+  describe('several workers at once', () => {
+    beforeEach(async () => {
+      await dataSource.query('DELETE FROM order_dead_letters');
+      await dataSource.query('DELETE FROM consumed_message_dead_letters');
+    });
+
+    async function seedDue(table: 'outbound' | 'inbound', count: number): Promise<void> {
+      for (let i = 0; i < count; i++) {
+        if (table === 'outbound') {
+          await dataSource.query(
+            `INSERT INTO order_dead_letters (id, "eventId", topic, payload, error)
+             VALUES ($1, $2, 'orders.order-placed', '{}', 'e')`,
+            [randomUUID(), randomUUID()],
+          );
+        } else {
+          await dataSource.query(
+            `INSERT INTO consumed_message_dead_letters
+               (id, topic, partition, "offset", "rawValue", "failureType", error, attempts)
+             VALUES ($1, 'payments.payment-processed', 0, $2, 'raw', 'RETRIES_EXHAUSTED', 'e', 1)`,
+            [randomUUID(), String(i)],
+          );
+        }
+      }
+    }
+
+    type Claimer = (
+      handler: (row: { id: string; retryCount: number }) => Promise<RetryUpdate>,
+    ) => Promise<boolean>;
+
+    const stores: Array<[string, 'outbound' | 'inbound', () => Claimer, string]> = [
+      ['outbound', 'outbound', () => (h) => outbound.processNextDue(h), 'order_dead_letters'],
+      [
+        'inbound',
+        'inbound',
+        () => (h) => inbound.processNextDue(h),
+        'consumed_message_dead_letters',
+      ],
+    ];
+
+    it.each(stores)(
+      '%s: two concurrent claims get different rows and a third finds none while both are held',
+      async (_label, kind, claimer, table) => {
+        await seedDue(kind, 2);
+        const claim = claimer();
+        let release: () => void = () => undefined;
+        const barrier = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const claimed: string[] = [];
+        let bothHeld: () => void = () => undefined;
+        const held = new Promise<void>((resolve) => {
+          bothHeld = resolve;
+        });
+        const holdingHandler = async (row: {
+          id: string;
+          retryCount: number;
+        }): Promise<RetryUpdate> => {
+          claimed.push(row.id);
+          if (claimed.length === 2) {
+            bothHeld();
+          }
+          await barrier;
+          return resolved(row.retryCount);
+        };
+
+        const a = claim(holdingHandler);
+        const b = claim(holdingHandler);
+        await held;
+        const third = jest.fn();
+        expect(await claim(third)).toBe(false);
+        expect(third).not.toHaveBeenCalled();
+
+        release();
+        expect(await Promise.all([a, b])).toEqual([true, true]);
+        expect(new Set(claimed).size).toBe(2);
+        const rows = await dataSource.query(`SELECT status, "retryCount" FROM ${table}`);
+        expect(rows).toEqual([
+          { status: 'RESOLVED', retryCount: 1 },
+          { status: 'RESOLVED', retryCount: 1 },
+        ]);
+      },
+    );
+
+    it.each(stores)(
+      '%s: a row whose worker crashed is immediately claimable again',
+      async (_label, kind, claimer) => {
+        await seedDue(kind, 1);
+        const claim = claimer();
+
+        await expect(
+          claim(async () => {
+            throw new Error('worker crashed');
+          }),
+        ).rejects.toThrow('worker crashed');
+
+        const retried = jest.fn(async (row: { retryCount: number }) => resolved(row.retryCount));
+        expect(await claim(retried)).toBe(true);
+        expect(retried).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each(stores)(
+      '%s: a rescheduled row is not claimed again in the same cycle',
+      async (_label, kind, claimer) => {
+        await seedDue(kind, 1);
+        const claim = claimer();
+        const later = new Date(Date.now() + 60_000);
+
+        expect(
+          await claim(async (row) => ({
+            ...resolved(row.retryCount),
+            status: DeadLetterStatus.PENDING_RETRY,
+            nextRetryAt: later,
+            resolvedAt: null,
+            lastError: 'still down',
+          })),
+        ).toBe(true);
+
+        expect(await claim(jest.fn())).toBe(false);
+      },
+    );
+  });
 });

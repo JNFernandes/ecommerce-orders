@@ -1,6 +1,6 @@
-import { Test } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -84,6 +84,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
   let kafka: StartedKafkaContainer;
   let app: INestApplication;
   let dataSource: DataSource;
+  let moduleRef: TestingModule;
   let kafkaProducer: Producer;
   let observer: Consumer;
   const observed: ObservedEvent[] = [];
@@ -119,7 +120,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
       },
     });
 
-    const moduleRef = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
         TypeOrmModule.forRoot({
@@ -298,5 +299,47 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
     expect(row.lastError).toContain(`no order ${missingOrderId} found`);
     expect(row.lastAttemptAt).not.toBeNull();
     expect(row.resolvedAt).toBeNull();
+  });
+
+  it('should let two workers drain the same table without processing any row twice', async () => {
+    // The application's worker is already running; start a second one with the same wiring.
+    const second = new DeadLetterRetryWorker(
+      moduleRef.get(ConfigService),
+      moduleRef.get(OrderDeadLetterRepository),
+      moduleRef.get(ConsumedMessageDeadLetterRepository),
+      moduleRef.get(OrderEventsProducer),
+      moduleRef.get(PaymentEventsConsumer),
+      moduleRef.get(OrderProjectionConsumer),
+    );
+    const rows = Array.from({ length: 4 }, () => {
+      const eventId = randomUUID();
+      return {
+        id: randomUUID(),
+        eventId,
+        topic: ORDER_PLACED_TOPIC,
+        payload: { eventId, aggregateId: randomUUID(), version: 1, occurredAt: new Date() },
+        error: 'simulated outage',
+      };
+    });
+    await dataSource.getRepository(OrderDeadLetterEntity).insert(rows);
+    second.onApplicationBootstrap();
+
+    try {
+      await waitFor(async () => {
+        const stored = await dataSource
+          .getRepository(OrderDeadLetterEntity)
+          .findBy(rows.map((row) => ({ id: row.id })));
+        expect(stored.map((row) => [row.status, row.retryCount])).toEqual(
+          rows.map(() => [DeadLetterStatus.RESOLVED, 1]),
+        );
+      });
+      await waitFor(() => {
+        for (const row of rows) {
+          expect(observed.filter((event) => event.eventId === row.eventId)).toHaveLength(1);
+        }
+      });
+    } finally {
+      await second.onModuleDestroy();
+    }
   });
 });

@@ -221,15 +221,15 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [ ] T023 [US4] Extend `tests/integration/dead-letter.repository.integration.spec.ts`:
+- [X] T023 [US4] Extend `tests/integration/dead-letter.repository.integration.spec.ts`:
   - **concurrency**: seed 2 due rows; start `processNextDue` A and B concurrently, each handler recording its row id and awaiting a shared barrier promise; while both are held, a third call C returns `false`; release the barrier; assert A ≠ B, both rows updated once (`retryCount` exactly 1), for both repositories;
   - **crash release**: a handler that throws → the row is immediately claimable again by a new call;
   - **no double processing in a cycle**: after a transient update (`nextRetryAt` in the future), an immediate second `processNextDue` returns `false`.
-- [ ] T024 [P] [US4] Extend `tests/component/dead-letter-retry.component.spec.ts`: start a **second** `DeadLetterRetryWorker` instance (resolve a second instance from the module, or construct it with the same dependencies) on 4 due outbound rows. Assert each row ends `RESOLVED` with `retryCount` 1, and the observer sees each `eventId` exactly once.
+- [X] T024 [P] [US4] Extend `tests/component/dead-letter-retry.component.spec.ts`: start a **second** `DeadLetterRetryWorker` instance (resolve a second instance from the module, or construct it with the same dependencies) on 4 due outbound rows. Assert each row ends `RESOLVED` with `retryCount` 1, and the observer sees each `eventId` exactly once.
 
 ### Implementation
 
-- [ ] T025 [US4] Verify T009's `processNextDue` satisfies T023/T024 (`FOR UPDATE SKIP LOCKED`, lock held during the handler, rollback on throw). Fix it in the repositories if not. No new code expected.
+- [X] T025 [US4] Verify T009's `processNextDue` satisfies T023/T024 (`FOR UPDATE SKIP LOCKED`, lock held during the handler, rollback on throw). Fix it in the repositories if not. No new code expected.
 
 **Checkpoint**: multi-instance safety is proven.
 
