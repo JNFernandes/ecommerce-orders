@@ -17,6 +17,11 @@ import {
   OrderEventsProducer,
 } from '../kafka/order-events.producer';
 import { OrderDeadLetterRepository } from '../../repositories/order-dead-letter.repository';
+import { ConsumedMessageDeadLetterEntity } from '../database/entities/consumed-message-dead-letter.entity';
+import { ConsumedMessageDeadLetterRepository } from '../../repositories/consumed-message-dead-letter.repository';
+import { PaymentEventsConsumer } from '../kafka/payment-events.consumer';
+import { OrderProjectionConsumer } from '../kafka/order-projection.consumer';
+import { MalformedMessageError } from '../kafka/malformed-message.error';
 import { AttemptResult, RetryUpdate, decideRetry } from './retry-policy';
 
 /** Injection token for the worker's clock; defaults to `() => new Date()`. */
@@ -28,6 +33,15 @@ const OUTBOUND_TOPICS: ReadonlySet<string> = new Set([
   ORDER_CONFIRMED_TOPIC,
   ORDER_CANCELLED_TOPIC,
 ]);
+
+/** A consumer that can re-handle one stored message (parse + handle, no retry or commit). */
+interface InboundHandler {
+  readonly topics: readonly string[];
+  process(topic: string, value: Buffer | null): Promise<void>;
+}
+
+type Kind = 'outbound' | 'inbound';
+type ClaimNext<T> = (handler: (row: T) => Promise<RetryUpdate>) => Promise<boolean>;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -41,7 +55,14 @@ function messageOf(error: unknown): string {
  * waits for at most the attempt in flight. Each row is claimed and updated in its own transaction
  * (`processNextDue`, `FOR UPDATE SKIP LOCKED`), so several instances can run side by side.
  *
- * Infrastructure orchestration only: the retry rules live in the pure `retry-policy`.
+ * - Outbound rows (`order_dead_letters`) are republished through OrderEventsProducer with the
+ *   same `eventId`.
+ * - Inbound rows (`consumed_message_dead_letters`) are re-handled by the consumer that owns the
+ *   topic (`process()`), so the same parsing and idempotency rules apply as for live messages.
+ *   Retries never commit offsets and never create new dead letters.
+ *
+ * Infrastructure orchestration only: the retry rules live in the pure `retry-policy`, business
+ * rules in the handlers it calls.
  */
 @Injectable()
 export class DeadLetterRetryWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -50,14 +71,19 @@ export class DeadLetterRetryWorker implements OnApplicationBootstrap, OnModuleDe
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<void> | null = null;
   private stopping = false;
+  private readonly inboundHandlers: readonly InboundHandler[];
 
   constructor(
     config: ConfigService,
     private readonly outbound: OrderDeadLetterRepository,
+    private readonly inbound: ConsumedMessageDeadLetterRepository,
     private readonly producer: OrderEventsProducer,
+    paymentConsumer: PaymentEventsConsumer,
+    projectionConsumer: OrderProjectionConsumer,
     @Optional() @Inject(DEAD_LETTER_CLOCK) private readonly now: () => Date = () => new Date(),
   ) {
     this.settings = config.getOrThrow<DeadLetterConfig>('deadLetter');
+    this.inboundHandlers = [paymentConsumer, projectionConsumer];
   }
 
   /** Schedules the first cycle after one interval. Never blocks startup. */
@@ -84,11 +110,20 @@ export class DeadLetterRetryWorker implements OnApplicationBootstrap, OnModuleDe
    * failure is logged and the next cycle tries again.
    */
   async runCycle(): Promise<void> {
-    const outbound = await this.drain('outbound', (handler) =>
-      this.outbound.processNextDue(handler),
+    const outbound = await this.drain<OrderDeadLetterEntity>(
+      'outbound',
+      (handler) => this.outbound.processNextDue(handler),
+      (row) => this.retryOutbound(row),
     );
-    if (outbound > 0) {
-      this.logger.debug(`Dead-letter retry cycle: ${outbound} outbound row(s) attempted`);
+    const inbound = await this.drain<ConsumedMessageDeadLetterEntity>(
+      'inbound',
+      (handler) => this.inbound.processNextDue(handler),
+      (row) => this.retryInbound(row),
+    );
+    if (outbound + inbound > 0) {
+      this.logger.debug(
+        `Dead-letter retry cycle: ${outbound} outbound and ${inbound} inbound row(s) attempted`,
+      );
     }
   }
 
@@ -107,20 +142,21 @@ export class DeadLetterRetryWorker implements OnApplicationBootstrap, OnModuleDe
   }
 
   /** Claims and processes rows one at a time until none is due, the batch is full or we stop. */
-  private async drain(
-    store: string,
-    claimNext: (handler: (row: OrderDeadLetterEntity) => Promise<RetryUpdate>) => Promise<boolean>,
+  private async drain<T>(
+    kind: Kind,
+    claimNext: ClaimNext<T>,
+    retry: (row: T) => Promise<RetryUpdate>,
   ): Promise<number> {
     let attempted = 0;
     try {
       while (attempted < this.settings.batchSize && !this.stopping) {
-        if (!(await claimNext((row) => this.retryOutbound(row)))) {
+        if (!(await claimNext(retry))) {
           break;
         }
         attempted++;
       }
     } catch (error) {
-      this.logger.error(`Dead-letter retry cycle failed (${store}): ${messageOf(error)}`);
+      this.logger.error(`Dead-letter retry cycle failed (${kind}): ${messageOf(error)}`);
     }
     return attempted;
   }
@@ -148,10 +184,39 @@ export class DeadLetterRetryWorker implements OnApplicationBootstrap, OnModuleDe
     }
   }
 
-  private report(kind: 'outbound', row: OrderDeadLetterEntity, update: RetryUpdate): void {
+  private async retryInbound(row: ConsumedMessageDeadLetterEntity): Promise<RetryUpdate> {
+    const result = await this.attemptInbound(row);
+    const update = decideRetry(row, result, this.now(), this.settings);
+    this.report('inbound', row, update);
+    return update;
+  }
+
+  private async attemptInbound(row: ConsumedMessageDeadLetterEntity): Promise<AttemptResult> {
+    const handler = this.inboundHandlers.find((candidate) => candidate.topics.includes(row.topic));
+    if (handler === undefined) {
+      return { kind: 'permanent', error: `No consumer handles topic "${row.topic}"` };
+    }
+    if (row.rawValue === null) {
+      return { kind: 'permanent', error: 'Stored message has no value (tombstone)' };
+    }
+    try {
+      await handler.process(row.topic, Buffer.from(row.rawValue, 'utf8'));
+      return { kind: 'success' };
+    } catch (error) {
+      const kind = error instanceof MalformedMessageError ? 'permanent' : 'transient';
+      return { kind, error: messageOf(error) };
+    }
+  }
+
+  private report(
+    kind: Kind,
+    row: OrderDeadLetterEntity | ConsumedMessageDeadLetterEntity,
+    update: RetryUpdate,
+  ): void {
+    const orderId = 'orderId' in row ? `, orderId ${row.orderId ?? '-'}` : '';
     const context =
-      `${kind} dead letter ${row.id} (topic ${row.topic}, eventId ${row.eventId}, ` +
-      `retryCount ${update.retryCount})`;
+      `${kind} dead letter ${row.id} (topic ${row.topic}, eventId ${row.eventId ?? '-'}` +
+      `${orderId}, retryCount ${update.retryCount})`;
     if (update.status === DeadLetterStatus.RESOLVED) {
       this.logger.log(`Resolved ${context}`);
     } else if (update.status === DeadLetterStatus.EXHAUSTED) {

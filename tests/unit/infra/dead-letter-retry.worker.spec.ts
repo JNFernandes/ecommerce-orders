@@ -7,6 +7,14 @@ import { DeadLetterStatus } from '../../../src/infra/database/entities/dead-lett
 import { OrderDeadLetterEntity } from '../../../src/infra/database/entities/order-dead-letter.entity';
 import { OrderDeadLetterRepository } from '../../../src/repositories/order-dead-letter.repository';
 import { OrderEventsProducer } from '../../../src/infra/kafka/order-events.producer';
+import {
+  ConsumedMessageDeadLetterEntity,
+  ConsumedMessageFailureType,
+} from '../../../src/infra/database/entities/consumed-message-dead-letter.entity';
+import { ConsumedMessageDeadLetterRepository } from '../../../src/repositories/consumed-message-dead-letter.repository';
+import { PaymentEventsConsumer } from '../../../src/infra/kafka/payment-events.consumer';
+import { OrderProjectionConsumer } from '../../../src/infra/kafka/order-projection.consumer';
+import { MalformedMessageError } from '../../../src/infra/kafka/malformed-message.error';
 
 const SETTINGS: DeadLetterConfig = {
   enabled: true,
@@ -52,6 +60,32 @@ function outboundRow(overrides: Partial<OrderDeadLetterEntity> = {}): OrderDeadL
   };
 }
 
+function inboundRow(
+  overrides: Partial<ConsumedMessageDeadLetterEntity> = {},
+): ConsumedMessageDeadLetterEntity {
+  return {
+    id: 'in-1',
+    topic: 'payments.payment-processed',
+    partition: 0,
+    offset: '41',
+    messageKey: null,
+    rawValue: '{"eventId":"evt-9"}',
+    eventId: 'evt-9',
+    orderId: 'order-9',
+    failureType: ConsumedMessageFailureType.RETRIES_EXHAUSTED,
+    error: 'order not found',
+    attempts: 5,
+    retryCount: 0,
+    createdAt: NOW,
+    status: DeadLetterStatus.PENDING_RETRY,
+    nextRetryAt: NOW,
+    lastAttemptAt: null,
+    lastError: null,
+    resolvedAt: null,
+    ...overrides,
+  };
+}
+
 /** Lets pending promise callbacks run without advancing fake time. */
 async function flush(): Promise<void> {
   for (let i = 0; i < 20; i++) {
@@ -70,7 +104,10 @@ function gate(): { promise: Promise<void>; release: () => void } {
 
 describe('DeadLetterRetryWorker', () => {
   let outbound: FakeStore<OrderDeadLetterEntity>;
+  let inbound: FakeStore<ConsumedMessageDeadLetterEntity>;
   let republish: jest.Mock;
+  let paymentProcess: jest.Mock;
+  let projectionProcess: jest.Mock;
   let worker: DeadLetterRetryWorker;
 
   function build(settings: Partial<DeadLetterConfig> = {}): DeadLetterRetryWorker {
@@ -80,7 +117,16 @@ describe('DeadLetterRetryWorker', () => {
     return new DeadLetterRetryWorker(
       config,
       outbound as unknown as OrderDeadLetterRepository,
+      inbound as unknown as ConsumedMessageDeadLetterRepository,
       { republish } as unknown as OrderEventsProducer,
+      {
+        topics: ['payments.payment-processed', 'payments.payment-failed'],
+        process: paymentProcess,
+      } as unknown as PaymentEventsConsumer,
+      {
+        topics: ['orders.order-placed', 'orders.order-confirmed', 'orders.order-cancelled'],
+        process: projectionProcess,
+      } as unknown as OrderProjectionConsumer,
       () => NOW,
     );
   }
@@ -92,7 +138,10 @@ describe('DeadLetterRetryWorker', () => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
     outbound = new FakeStore();
+    inbound = new FakeStore();
     republish = jest.fn().mockResolvedValue(undefined);
+    paymentProcess = jest.fn().mockResolvedValue(undefined);
+    projectionProcess = jest.fn().mockResolvedValue(undefined);
     worker = build();
   });
 
@@ -236,6 +285,80 @@ describe('DeadLetterRetryWorker', () => {
 
       expect(republish).not.toHaveBeenCalled();
       expect(update.status).toBe(DeadLetterStatus.EXHAUSTED);
+    });
+  });
+
+  describe('inbound rows', () => {
+    async function runOne(row: ConsumedMessageDeadLetterEntity): Promise<RetryUpdate> {
+      inbound.queue.push(row);
+      await worker.runCycle();
+      return inbound.updates[0];
+    }
+
+    it('should re-handle a payments.* row through the payment consumer and resolve it', async () => {
+      const update = await runOne(inboundRow());
+
+      expect(paymentProcess).toHaveBeenCalledWith(
+        'payments.payment-processed',
+        Buffer.from('{"eventId":"evt-9"}', 'utf8'),
+      );
+      expect(projectionProcess).not.toHaveBeenCalled();
+      expect(update).toMatchObject({ status: DeadLetterStatus.RESOLVED, retryCount: 1 });
+    });
+
+    it('should re-handle an orders.* row through the projection consumer', async () => {
+      await runOne(inboundRow({ topic: 'orders.order-confirmed' }));
+
+      expect(projectionProcess).toHaveBeenCalledWith(
+        'orders.order-confirmed',
+        Buffer.from('{"eventId":"evt-9"}', 'utf8'),
+      );
+      expect(paymentProcess).not.toHaveBeenCalled();
+    });
+
+    it('should exhaust a row whose message turns out to be malformed', async () => {
+      paymentProcess.mockRejectedValue(new MalformedMessageError('missing orderId'));
+
+      const update = await runOne(inboundRow());
+
+      expect(update).toMatchObject({
+        status: DeadLetterStatus.EXHAUSTED,
+        lastError: 'missing orderId',
+      });
+    });
+
+    it('should reschedule a row whose handling fails for another reason', async () => {
+      paymentProcess.mockRejectedValue(new Error('order not found'));
+
+      const update = await runOne(inboundRow());
+
+      expect(update).toMatchObject({
+        status: DeadLetterStatus.PENDING_RETRY,
+        nextRetryAt: new Date(NOW.getTime() + 5_000),
+        lastError: 'order not found',
+      });
+    });
+
+    it.each([
+      ['an unknown topic', { topic: 'inventory.stock-reserved' }],
+      ['a null raw value (tombstone)', { rawValue: null }],
+    ])('should exhaust %s without handling it', async (_label, overrides) => {
+      const update = await runOne(inboundRow(overrides));
+
+      expect(paymentProcess).not.toHaveBeenCalled();
+      expect(projectionProcess).not.toHaveBeenCalled();
+      expect(update.status).toBe(DeadLetterStatus.EXHAUSTED);
+    });
+
+    it('should drain inbound rows too, up to batchSize per store', async () => {
+      outbound.queue.push(outboundRow({ id: 'o-1' }));
+      inbound.queue.push(...[1, 2, 3, 4].map((n) => inboundRow({ id: `in-${n}` })));
+
+      await worker.runCycle();
+
+      expect(outbound.updates).toHaveLength(1);
+      expect(inbound.updates).toHaveLength(3);
+      expect(inbound.queue).toHaveLength(1);
     });
   });
 });

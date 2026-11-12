@@ -156,7 +156,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [ ] T015 [P] [US2] Extend `tests/unit/infra/payment-events.consumer.spec.ts` and `tests/unit/infra/order-projection.consumer.spec.ts`:
+- [X] T015 [P] [US2] Extend `tests/unit/infra/payment-events.consumer.spec.ts` and `tests/unit/infra/order-projection.consumer.spec.ts`:
   - `topics` lists the consumer's topics;
   - `process(topic, value)` parses and handles once, with **no** retry, no dead-letter call and no `commitOffsets`;
   - a malformed value makes `process` reject with `MalformedMessageError`;
@@ -164,21 +164,21 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
   The existing `handleMessage` tests must stay green unchanged.
 
-- [ ] T016 [P] [US2] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts`:
+- [X] T016 [P] [US2] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts`:
   - a `payments.*` row calls `paymentConsumer.process(row.topic, Buffer.from(row.rawValue))` and an `orders.*` row calls `projectionConsumer.process`;
   - success → `RESOLVED`; `MalformedMessageError` → `EXHAUSTED` (permanent); another error → transient;
   - an unknown topic → permanent;
   - `rawValue: null` → permanent;
   - each cycle drains inbound rows too, up to `batchSize`.
-- [ ] T017 [US2] Extend `tests/component/dead-letter-retry.component.spec.ts`:
+- [X] T017 [US2] Extend `tests/component/dead-letter-retry.component.spec.ts`:
   - add `ReactToPaymentOutcomeService`, `ProcessedEventRepository`, `PaymentEventsConsumer` and the projection pieces needed by the worker's dependencies. Construct `OrderProjectionConsumer` with `ReadModelModule` and a `MongoDBContainer`, or provide a minimal mock via `overrideProvider` if Mongo is not needed for the payment case. Record the choice in a comment;
   - place an order via REST (the event publishes normally), then insert a `consumed_message_dead_letters` row (`topic payments.payment-processed`, `rawValue` = a valid message for that order, `failureType RETRIES_EXHAUSTED`, `status PENDING_RETRY`) and poll until the order is `CONFIRMED` and the row `RESOLVED`;
   - insert the identical message again as a new row → it becomes `RESOLVED` with the order still confirmed once (one `processed_events` row).
 
 ### Implementation
 
-- [ ] T018 [US2] In `src/infra/kafka/payment-events.consumer.ts` and `src/infra/kafka/order-projection.consumer.ts`, add a `readonly topics` and `async process(topic: string, value: Buffer | null): Promise<void>` (parse + handle, exactly the parse and handle steps used today), and make `handleMessage` pass them to `consumeWithDeadLetter` (`parse`/`handle` built from `process`'s pieces). Pure refactor of live consumption. Makes T015 pass.
-- [ ] T019 [US2] Add `retryInbound(row)` to `src/infra/dead-letter/dead-letter-retry.worker.ts`:
+- [X] T018 [US2] In `src/infra/kafka/payment-events.consumer.ts` and `src/infra/kafka/order-projection.consumer.ts`, add a `readonly topics` and `async process(topic: string, value: Buffer | null): Promise<void>` (parse + handle, exactly the parse and handle steps used today), and make `handleMessage` pass them to `consumeWithDeadLetter` (`parse`/`handle` built from `process`'s pieces). Pure refactor of live consumption. Makes T015 pass.
+- [X] T019 [US2] Add `retryInbound(row)` to `src/infra/dead-letter/dead-letter-retry.worker.ts`:
   - route by `row.topic` to the consumer whose `topics` include it (unknown topic → permanent);
   - `rawValue === null` → permanent;
   - `await consumer.process(row.topic, Buffer.from(row.rawValue, 'utf8'))`;

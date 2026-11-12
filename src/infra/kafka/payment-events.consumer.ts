@@ -37,6 +37,9 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
   private readonly config: KafkaConfig;
   private readonly consumer: Consumer;
 
+  /** The topics this consumer owns (also used to route inbound dead-letter retries). */
+  readonly topics: readonly string[] = [PAYMENT_PROCESSED_TOPIC, PAYMENT_FAILED_TOPIC];
+
   constructor(
     @Inject(KAFKA_CLIENT) kafka: Kafka,
     private readonly commandBus: CommandBus,
@@ -71,10 +74,7 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
 
   private async start(): Promise<void> {
     await this.consumer.connect();
-    await this.consumer.subscribe({
-      topics: [PAYMENT_PROCESSED_TOPIC, PAYMENT_FAILED_TOPIC],
-      fromBeginning: true,
-    });
+    await this.consumer.subscribe({ topics: [...this.topics], fromBeginning: true });
     await this.consumer.run({
       autoCommit: false,
       eachMessage: (payload) => this.handleMessage(payload),
@@ -97,10 +97,7 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
         eventId: parsed.inboundEvent.eventId,
         orderId: parsed.inboundEvent.orderId,
       }),
-      handle: (parsed) =>
-        this.commandBus.execute(
-          new ReactToPaymentOutcomeCommand(parsed.outcome, parsed.inboundEvent, parsed.reason),
-        ),
+      handle: (parsed) => this.handle(parsed),
       deadLetters: this.deadLetters,
       retry: {
         maxAttempts: this.config.maxAttempts,
@@ -117,5 +114,20 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
         ]),
       logger: this.logger,
     });
+  }
+
+  /**
+   * Parses and handles one message exactly once: no retry, no dead letter, no commit. Used by
+   * the dead-letter retry worker, so retries go through the same parsing and the same
+   * idempotent command as live consumption. Throws MalformedMessageError for poison messages.
+   */
+  async process(topic: string, value: Buffer | null): Promise<void> {
+    await this.handle(parsePaymentMessage(topic, value));
+  }
+
+  private handle(parsed: ParsedPaymentMessage): Promise<unknown> {
+    return this.commandBus.execute(
+      new ReactToPaymentOutcomeCommand(parsed.outcome, parsed.inboundEvent, parsed.reason),
+    );
   }
 }

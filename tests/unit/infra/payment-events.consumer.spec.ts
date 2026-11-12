@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { MalformedMessageError } from '../../../src/infra/kafka/malformed-message.error';
 import { CommandBus } from '@nestjs/cqrs';
 import { ConfigService } from '@nestjs/config';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
@@ -237,5 +238,47 @@ describe('PaymentEventsConsumer.handleMessage', () => {
       );
       expect(kafkaConsumer.commitOffsets).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('PaymentEventsConsumer.process (dead-letter retry entry point)', () => {
+  it('should list the payment topics it owns', () => {
+    expect(buildConsumer().consumer.topics).toEqual([
+      'payments.payment-processed',
+      'payments.payment-failed',
+    ]);
+  });
+
+  it('should parse and dispatch once, without retrying, dead-lettering or committing', async () => {
+    const dispatch = jest.fn().mockResolvedValue(undefined);
+    const { consumer, kafkaConsumer, deadLetters } = buildConsumer(dispatch);
+
+    await consumer.process(PAYMENT_PROCESSED_TOPIC, processedValue());
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0][0]).toBeInstanceOf(ReactToPaymentOutcomeCommand);
+    expect(kafkaConsumer.commitOffsets).not.toHaveBeenCalled();
+    expect(deadLetters.recordMalformed).not.toHaveBeenCalled();
+    expect(deadLetters.recordRetriesExhausted).not.toHaveBeenCalled();
+  });
+
+  it('should reject a malformed value with MalformedMessageError', async () => {
+    const { consumer } = buildConsumer();
+
+    await expect(
+      consumer.process(PAYMENT_PROCESSED_TOPIC, Buffer.from('not json')),
+    ).rejects.toBeInstanceOf(MalformedMessageError);
+  });
+
+  it('should propagate a handler error after a single attempt', async () => {
+    const dispatch = jest
+      .fn()
+      .mockRejectedValue(new OrderNotFoundForPaymentError(ORDER_ID, PAYMENT_ID));
+    const { consumer } = buildConsumer(dispatch);
+
+    await expect(consumer.process(PAYMENT_PROCESSED_TOPIC, processedValue())).rejects.toThrow(
+      OrderNotFoundForPaymentError,
+    );
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });

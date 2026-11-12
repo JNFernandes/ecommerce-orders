@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { KafkaContainer, StartedKafkaContainer } from '@testcontainers/kafka';
@@ -27,6 +28,21 @@ import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { DeadLetterRetryWorker } from '../../src/infra/dead-letter/dead-letter-retry.worker';
+import { ProcessedEventEntity } from '../../src/infra/database/entities/processed-event.entity';
+import {
+  ConsumedMessageDeadLetterEntity,
+  ConsumedMessageFailureType,
+} from '../../src/infra/database/entities/consumed-message-dead-letter.entity';
+import { OrderStatus } from '../../src/domain/order-status.enum';
+import { ProcessedEventRepository } from '../../src/repositories/processed-event.repository';
+import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
+import { ConfirmOrderService } from '../../src/services/confirm-order.service';
+import { CancelOrderService } from '../../src/services/cancel-order.service';
+import { ReactToPaymentOutcomeService } from '../../src/services/react-to-payment-outcome.service';
+import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.consumer';
+import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
+import { OrderProjectionService } from '../../src/read-model/order-projection.service';
+import { PAYMENT_PROCESSED_TOPIC } from '../../src/infra/kafka/payment-message.parser';
 
 jest.setTimeout(240_000);
 
@@ -38,6 +54,7 @@ const ENV = {
   DEAD_LETTER_RETRY_INTERVAL_MS: '200',
   DEAD_LETTER_BASE_DELAY_MS: '100',
   DEAD_LETTER_MAX_DELAY_MS: '1000',
+  DEAD_LETTER_MAX_RETRIES: '3',
   KAFKA_CONSUMER_ENABLED: 'false',
 };
 
@@ -120,6 +137,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
           OrderItemEntity,
           OrderDeadLetterEntity,
           CustomerEntity,
+          ProcessedEventEntity,
+          ConsumedMessageDeadLetterEntity,
         ]),
         CqrsModule.forRoot(),
         KafkaModule,
@@ -127,10 +146,21 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
       controllers: [OrdersController],
       providers: [
         PlaceOrderService,
+        ConfirmOrderService,
+        CancelOrderService,
+        ReactToPaymentOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
+        ProcessedEventRepository,
+        ConsumedMessageDeadLetterRepository,
         OrderEventsProducer,
+        PaymentEventsConsumer,
+        OrderProjectionConsumer,
+        // The inbound cases here are payment messages, so MongoDB is not needed: the projection
+        // service (a dependency of OrderProjectionConsumer, which the worker routes orders.*
+        // rows to) is a stub. Projection retries are covered by the worker unit tests.
+        { provide: OrderProjectionService, useValue: { project: jest.fn() } },
         DeadLetterRetryWorker,
       ],
     }).compile();
@@ -195,5 +225,64 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
     const event = observed.find((e) => e.aggregateId === orderId);
     expect(event?.eventId).toBe(pending.eventId);
     send.mockRestore();
+  });
+
+  async function placeOrder(): Promise<string> {
+    const response = await request(app.getHttpServer())
+      .post('/orders')
+      .send({ customerId: CUSTOMER_ID, items: [{ productId: 'p-2', quantity: 2, unitPrice: 5 }] });
+    expect(response.status).toBe(201);
+    return (response.body as { orderId: string }).orderId;
+  }
+
+  /** Stores a payments.payment-processed message as an inbound dead letter, due now. */
+  async function deadLetterPayment(orderId: string, eventId: string): Promise<string> {
+    const id = randomUUID();
+    const rawValue = JSON.stringify({
+      eventId,
+      occurredAt: new Date().toISOString(),
+      aggregateId: randomUUID(),
+      version: 1,
+      orderId,
+      amount: 10,
+      currency: 'USD',
+      processedAt: new Date().toISOString(),
+    });
+    await dataSource.getRepository(ConsumedMessageDeadLetterEntity).insert({
+      id,
+      topic: PAYMENT_PROCESSED_TOPIC,
+      partition: 0,
+      offset: '0',
+      messageKey: null,
+      rawValue,
+      eventId,
+      orderId,
+      failureType: ConsumedMessageFailureType.RETRIES_EXHAUSTED,
+      error: 'simulated earlier failure',
+      attempts: 5,
+    });
+    return id;
+  }
+
+  async function inboundRow(id: string): Promise<ConsumedMessageDeadLetterEntity> {
+    return dataSource.getRepository(ConsumedMessageDeadLetterEntity).findOneByOrFail({ id });
+  }
+
+  it('should re-handle a dead-lettered payment message, and resolve its duplicate without a second confirmation', async () => {
+    const orderId = await placeOrder();
+    const eventId = randomUUID();
+
+    const first = await deadLetterPayment(orderId, eventId);
+    await waitFor(async () => {
+      expect((await inboundRow(first)).status).toBe(DeadLetterStatus.RESOLVED);
+    });
+    const order = await dataSource.getRepository(OrderEntity).findOneByOrFail({ id: orderId });
+    expect(order.status).toBe(OrderStatus.CONFIRMED);
+
+    const duplicate = await deadLetterPayment(orderId, eventId);
+    await waitFor(async () => {
+      expect((await inboundRow(duplicate)).status).toBe(DeadLetterStatus.RESOLVED);
+    });
+    expect(await dataSource.getRepository(ProcessedEventEntity).countBy({ eventId })).toBe(1);
   });
 });
