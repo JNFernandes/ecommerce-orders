@@ -100,6 +100,11 @@ cycle (every 30 s by default). From the first worker attempt to exhaustion takes
   the JSON may differ, because PostgreSQL `jsonb` doesn't keep it.
 - A projection retry while MongoDB is down is a transient failure: the row waits and resolves
   once MongoDB is back.
+- **Kafka down at startup or deploy**: the service still starts, because the producer connects
+  lazily on first publish. Each publish attempt while Kafka is down gives up within about 3 s
+  (`KAFKA_CONNECTION_TIMEOUT_MS`, `KAFKA_PRODUCER_RETRIES`), so the client still gets its
+  `201`/`200` and the event lands here as `PENDING_RETRY`. The worker's own republish attempts
+  fail just as quickly, and the first one after Kafka recovers reconnects the producer.
 - **Remaining gap**: if the process dies between the DB commit and the first publish attempt,
   the event is never dead-lettered. Closing that needs a transactional outbox (out of scope).
 
