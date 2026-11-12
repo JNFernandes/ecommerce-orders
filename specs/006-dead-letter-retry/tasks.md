@@ -111,8 +111,8 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [ ] T010 [P] [US1] Unit test for `OrderEventsProducer.republish` in `tests/unit/infra/order-events.producer.spec.ts` (mock `Producer`): it sends `{ topic, messages: [{ key: payload.aggregateId, value: JSON.stringify(payload) }] }` and propagates send errors.
-- [ ] T011 [P] [US1] Unit tests in `tests/unit/infra/dead-letter-retry.worker.spec.ts` (Jest fake timers, mocked repositories, producer and consumers, config `intervalMs 1000, batchSize 3`):
+- [X] T010 [P] [US1] Unit test for `OrderEventsProducer.republish` in `tests/unit/infra/order-events.producer.spec.ts` (mock `Producer`): it sends `{ topic, messages: [{ key: payload.aggregateId, value: JSON.stringify(payload) }] }` and propagates send errors.
+- [X] T011 [P] [US1] Unit tests in `tests/unit/infra/dead-letter-retry.worker.spec.ts` (Jest fake timers, mocked repositories, producer and consumers, config `intervalMs 1000, batchSize 3`):
   - `onApplicationBootstrap` returns immediately and runs no cycle before `intervalMs`;
   - after `intervalMs`, one cycle calls `outbound.processNextDue` until it returns `false` or 3 times;
   - a slow cycle (handler promise held open) is not overlapped by a second cycle even after several intervals;
@@ -121,7 +121,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
   - a send error gives a transient result, a topic outside the three `orders.*` topics gives a permanent result, and a payload missing a string `eventId`/`aggregateId` gives a permanent result;
   - `enabled: false` → no cycles ever;
   - `onModuleDestroy` clears the timer and awaits the in-flight cycle, and no further `processNextDue` calls happen afterwards.
-- [ ] T012 [US1] Component test `tests/component/dead-letter-retry.component.spec.ts`:
+- [X] T012 [US1] Component test `tests/component/dead-letter-retry.component.spec.ts`:
   - real `PostgreSqlContainer` + `KafkaContainer`, topics via `createTopicsWhenReady`;
   - write-path providers plus `DeadLetterRetryWorker`, with `DEAD_LETTER_RETRY_INTERVAL_MS=200`, `DEAD_LETTER_BASE_DELAY_MS=100` and `KAFKA_CONSUMER_ENABLED=false`;
   - an observer consumer on `orders.order-placed`;
@@ -133,8 +133,8 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Implementation
 
-- [ ] T013 [US1] Add `republish(topic: string, payload: Record<string, unknown>): Promise<void>` to `src/infra/kafka/order-events.producer.ts`, with the key taken from `payload.aggregateId` (string). Add JSDoc ("same event, same eventId; at-least-once"). Makes T010 pass.
-- [ ] T014 [US1] Create `DeadLetterRetryWorker` in `src/infra/dead-letter/dead-letter-retry.worker.ts`, implementing `OnApplicationBootstrap` and `OnModuleDestroy`:
+- [X] T013 [US1] Add `republish(topic: string, payload: Record<string, unknown>): Promise<void>` to `src/infra/kafka/order-events.producer.ts`, with the key taken from `payload.aggregateId` (string). Add JSDoc ("same event, same eventId; at-least-once"). Makes T010 pass.
+- [X] T014 [US1] Create `DeadLetterRetryWorker` in `src/infra/dead-letter/dead-letter-retry.worker.ts`, implementing `OnApplicationBootstrap` and `OnModuleDestroy`:
   - inject `ConfigService`, `OrderDeadLetterRepository`, `ConsumedMessageDeadLetterRepository`, `OrderEventsProducer`, `PaymentEventsConsumer` and `OrderProjectionConsumer`;
   - a self-rescheduling `setTimeout` (`unref`) with `stopping` / `inFlight` handling (research R1);
   - `runCycle()`: loop `outbound.processNextDue(this.retryOutbound)` up to `batchSize`, stopping early when it returns `false` or `stopping` is set;

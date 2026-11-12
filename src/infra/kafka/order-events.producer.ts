@@ -41,6 +41,18 @@ export class OrderEventsProducer {
     });
   }
 
+  /**
+   * Republishes a stored event (dead-letter retry): the same event, with the same `eventId`, to
+   * the topic it was meant for, keyed by its `aggregateId`. Delivery is at-least-once; consumers
+   * deduplicate by `eventId`. The caller validates the topic and the payload ids first.
+   */
+  async republish(topic: string, payload: Record<string, unknown>): Promise<void> {
+    await this.producer.send({
+      topic,
+      messages: [{ key: String(payload.aggregateId), value: JSON.stringify(payload) }],
+    });
+  }
+
   async publishOrderConfirmed(event: OrderConfirmed): Promise<void> {
     await this.producer.send({
       topic: ORDER_CONFIRMED_TOPIC,
