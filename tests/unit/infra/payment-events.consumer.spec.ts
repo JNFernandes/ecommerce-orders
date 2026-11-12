@@ -284,3 +284,79 @@ describe('PaymentEventsConsumer.process (dead-letter retry entry point)', () => 
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('PaymentEventsConsumer startup and shutdown', () => {
+  let logSpies: jest.SpyInstance[];
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    logSpies = (['log', 'warn', 'error'] as const).map((level) =>
+      jest.spyOn(Logger.prototype, level).mockImplementation(() => undefined),
+    );
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    logSpies.forEach((spy) => spy.mockRestore());
+  });
+
+  function withKafkaConsumer(kafkaConsumer: Record<string, jest.Mock>): PaymentEventsConsumer {
+    const built = buildConsumer();
+    Object.assign(built.kafkaConsumer, kafkaConsumer);
+    return built.consumer;
+  }
+
+  it('should not block bootstrap, and keep retrying a failed connect with backoff until it runs', async () => {
+    const kafkaConsumer = {
+      connect: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        .mockResolvedValue(undefined),
+      subscribe: jest.fn().mockResolvedValue(undefined),
+      run: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    };
+    const consumer = withKafkaConsumer(kafkaConsumer);
+
+    expect(consumer.onApplicationBootstrap()).toBeUndefined();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(kafkaConsumer.connect).toHaveBeenCalledTimes(1);
+    expect(kafkaConsumer.run).not.toHaveBeenCalled();
+    expect(kafkaConsumer.disconnect).toHaveBeenCalledTimes(1); // cleaned up after the failure
+
+    await jest.advanceTimersByTimeAsync(10_000);
+
+    expect(kafkaConsumer.connect).toHaveBeenCalledTimes(3);
+    expect(kafkaConsumer.run).toHaveBeenCalledTimes(1);
+    expect(kafkaConsumer.subscribe).toHaveBeenCalledWith({
+      topics: [...consumer.topics],
+      fromBeginning: true,
+    });
+    expect(Logger.prototype.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Kafka is unreachable'),
+    );
+    expect(Logger.prototype.log).toHaveBeenCalledWith(
+      expect.stringContaining('Kafka is available again'),
+    );
+    await consumer.onApplicationShutdown();
+  });
+
+  it('should stop retrying and disconnect on shutdown while Kafka is still down', async () => {
+    const kafkaConsumer = {
+      connect: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+      subscribe: jest.fn(),
+      run: jest.fn(),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    };
+    const consumer = withKafkaConsumer(kafkaConsumer);
+    consumer.onApplicationBootstrap();
+    await jest.advanceTimersByTimeAsync(0);
+
+    await consumer.onApplicationShutdown();
+    await jest.advanceTimersByTimeAsync(600_000);
+
+    expect(kafkaConsumer.connect).toHaveBeenCalledTimes(1);
+    expect(kafkaConsumer.disconnect).toHaveBeenCalledTimes(2);
+  });
+});
