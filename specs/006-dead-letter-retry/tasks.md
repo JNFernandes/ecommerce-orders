@@ -111,8 +111,8 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [X] T010 [P] [US1] Unit test for `OrderEventsProducer.republish` in `tests/unit/infra/order-events.producer.spec.ts` (mock `Producer`): it sends `{ topic, messages: [{ key: payload.aggregateId, value: JSON.stringify(payload) }] }` and propagates send errors.
-- [X] T011 [P] [US1] Unit tests in `tests/unit/infra/dead-letter-retry.worker.spec.ts` (Jest fake timers, mocked repositories, producer and consumers, config `intervalMs 1000, batchSize 3`):
+- [x] T010 [P] [US1] Unit test for `OrderEventsProducer.republish` in `tests/unit/infra/order-events.producer.spec.ts` (mock `Producer`): it sends `{ topic, messages: [{ key: payload.aggregateId, value: JSON.stringify(payload) }] }` and propagates send errors.
+- [x] T011 [P] [US1] Unit tests in `tests/unit/infra/dead-letter-retry.worker.spec.ts` (Jest fake timers, mocked repositories, producer and consumers, config `intervalMs 1000, batchSize 3`):
   - `onApplicationBootstrap` returns immediately and runs no cycle before `intervalMs`;
   - after `intervalMs`, one cycle calls `outbound.processNextDue` until it returns `false` or 3 times;
   - a slow cycle (handler promise held open) is not overlapped by a second cycle even after several intervals;
@@ -121,7 +121,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
   - a send error gives a transient result, a topic outside the three `orders.*` topics gives a permanent result, and a payload missing a string `eventId`/`aggregateId` gives a permanent result;
   - `enabled: false` → no cycles ever;
   - `onModuleDestroy` clears the timer and awaits the in-flight cycle, and no further `processNextDue` calls happen afterwards.
-- [X] T012 [US1] Component test `tests/component/dead-letter-retry.component.spec.ts`:
+- [x] T012 [US1] Component test `tests/component/dead-letter-retry.component.spec.ts`:
   - real `PostgreSqlContainer` + `KafkaContainer`, topics via `createTopicsWhenReady`;
   - write-path providers plus `DeadLetterRetryWorker`, with `DEAD_LETTER_RETRY_INTERVAL_MS=200`, `DEAD_LETTER_BASE_DELAY_MS=100` and `KAFKA_CONSUMER_ENABLED=false`;
   - an observer consumer on `orders.order-placed`;
@@ -133,8 +133,8 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Implementation
 
-- [X] T013 [US1] Add `republish(topic: string, payload: Record<string, unknown>): Promise<void>` to `src/infra/kafka/order-events.producer.ts`, with the key taken from `payload.aggregateId` (string). Add JSDoc ("same event, same eventId; at-least-once"). Makes T010 pass.
-- [X] T014 [US1] Create `DeadLetterRetryWorker` in `src/infra/dead-letter/dead-letter-retry.worker.ts`, implementing `OnApplicationBootstrap` and `OnModuleDestroy`:
+- [x] T013 [US1] Add `republish(topic: string, payload: Record<string, unknown>): Promise<void>` to `src/infra/kafka/order-events.producer.ts`, with the key taken from `payload.aggregateId` (string). Add JSDoc ("same event, same eventId; at-least-once"). Makes T010 pass.
+- [x] T014 [US1] Create `DeadLetterRetryWorker` in `src/infra/dead-letter/dead-letter-retry.worker.ts`, implementing `OnApplicationBootstrap` and `OnModuleDestroy`:
   - inject `ConfigService`, `OrderDeadLetterRepository`, `ConsumedMessageDeadLetterRepository`, `OrderEventsProducer`, `PaymentEventsConsumer` and `OrderProjectionConsumer`;
   - a self-rescheduling `setTimeout` (`unref`) with `stopping` / `inFlight` handling (research R1);
   - `runCycle()`: loop `outbound.processNextDue(this.retryOutbound)` up to `batchSize`, stopping early when it returns `false` or `stopping` is set;
@@ -156,7 +156,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [X] T015 [P] [US2] Extend `tests/unit/infra/payment-events.consumer.spec.ts` and `tests/unit/infra/order-projection.consumer.spec.ts`:
+- [x] T015 [P] [US2] Extend `tests/unit/infra/payment-events.consumer.spec.ts` and `tests/unit/infra/order-projection.consumer.spec.ts`:
   - `topics` lists the consumer's topics;
   - `process(topic, value)` parses and handles once, with **no** retry, no dead-letter call and no `commitOffsets`;
   - a malformed value makes `process` reject with `MalformedMessageError`;
@@ -164,21 +164,21 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
   The existing `handleMessage` tests must stay green unchanged.
 
-- [X] T016 [P] [US2] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts`:
+- [x] T016 [P] [US2] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts`:
   - a `payments.*` row calls `paymentConsumer.process(row.topic, Buffer.from(row.rawValue))` and an `orders.*` row calls `projectionConsumer.process`;
   - success → `RESOLVED`; `MalformedMessageError` → `EXHAUSTED` (permanent); another error → transient;
   - an unknown topic → permanent;
   - `rawValue: null` → permanent;
   - each cycle drains inbound rows too, up to `batchSize`.
-- [X] T017 [US2] Extend `tests/component/dead-letter-retry.component.spec.ts`:
+- [x] T017 [US2] Extend `tests/component/dead-letter-retry.component.spec.ts`:
   - add `ReactToPaymentOutcomeService`, `ProcessedEventRepository`, `PaymentEventsConsumer` and the projection pieces needed by the worker's dependencies. Construct `OrderProjectionConsumer` with `ReadModelModule` and a `MongoDBContainer`, or provide a minimal mock via `overrideProvider` if Mongo is not needed for the payment case. Record the choice in a comment;
   - place an order via REST (the event publishes normally), then insert a `consumed_message_dead_letters` row (`topic payments.payment-processed`, `rawValue` = a valid message for that order, `failureType RETRIES_EXHAUSTED`, `status PENDING_RETRY`) and poll until the order is `CONFIRMED` and the row `RESOLVED`;
   - insert the identical message again as a new row → it becomes `RESOLVED` with the order still confirmed once (one `processed_events` row).
 
 ### Implementation
 
-- [X] T018 [US2] In `src/infra/kafka/payment-events.consumer.ts` and `src/infra/kafka/order-projection.consumer.ts`, add a `readonly topics` and `async process(topic: string, value: Buffer | null): Promise<void>` (parse + handle, exactly the parse and handle steps used today), and make `handleMessage` pass them to `consumeWithDeadLetter` (`parse`/`handle` built from `process`'s pieces). Pure refactor of live consumption. Makes T015 pass.
-- [X] T019 [US2] Add `retryInbound(row)` to `src/infra/dead-letter/dead-letter-retry.worker.ts`:
+- [x] T018 [US2] In `src/infra/kafka/payment-events.consumer.ts` and `src/infra/kafka/order-projection.consumer.ts`, add a `readonly topics` and `async process(topic: string, value: Buffer | null): Promise<void>` (parse + handle, exactly the parse and handle steps used today), and make `handleMessage` pass them to `consumeWithDeadLetter` (`parse`/`handle` built from `process`'s pieces). Pure refactor of live consumption. Makes T015 pass.
+- [x] T019 [US2] Add `retryInbound(row)` to `src/infra/dead-letter/dead-letter-retry.worker.ts`:
   - route by `row.topic` to the consumer whose `topics` include it (unknown topic → permanent);
   - `rawValue === null` → permanent;
   - `await consumer.process(row.topic, Buffer.from(row.rawValue, 'utf8'))`;
@@ -199,15 +199,15 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [X] T020 [P] [US3] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts` (fake timers and an injected clock):
+- [x] T020 [P] [US3] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts` (fake timers and an injected clock):
   - a row whose handler always fails is attempted on successive due times with gaps of 5s, 10s and 20s (assert the `nextRetryAt` values passed to the update), and the third failure (with `maxRetries 3`) yields `EXHAUSTED`;
   - exhaustion logs **one** `logger.error` containing the row id, `outbound`/`inbound`, topic, eventId, orderId (inbound), `retryCount` and `lastError`;
   - `RESOLVED`/`EXHAUSTED` rows are never passed to handlers (the repository contract; covered by T004, re-asserted here through the mock returning `false`).
-- [X] T021 [US3] Extend `tests/component/dead-letter-retry.component.spec.ts`: an inbound row for a random `orderId` with `DEAD_LETTER_MAX_RETRIES=3` and `DEAD_LETTER_BASE_DELAY_MS=100` → poll until `EXHAUSTED`. Assert `retryCount = 3`, `lastError` mentions the order not being found, and `resolvedAt` is null.
+- [x] T021 [US3] Extend `tests/component/dead-letter-retry.component.spec.ts`: an inbound row for a random `orderId` with `DEAD_LETTER_MAX_RETRIES=3` and `DEAD_LETTER_BASE_DELAY_MS=100` → poll until `EXHAUSTED`. Assert `retryCount = 3`, `lastError` mentions the order not being found, and `resolvedAt` is null.
 
 ### Implementation
 
-- [X] T022 [US3] In `src/infra/dead-letter/dead-letter-retry.worker.ts`, after `decideRetry` returns `EXHAUSTED`, log `logger.error` with full context (research R3/FR-011). Ensure the injected clock (`now: () => Date`, default `() => new Date()`) is used everywhere for fake-time testing. Makes T020 and T021 pass (the policy already exhausts).
+- [x] T022 [US3] In `src/infra/dead-letter/dead-letter-retry.worker.ts`, after `decideRetry` returns `EXHAUSTED`, log `logger.error` with full context (research R3/FR-011). Ensure the injected clock (`now: () => Date`, default `() => new Date()`) is used everywhere for fake-time testing. Makes T020 and T021 pass (the policy already exhausts).
 
 **Checkpoint**: retries are bounded and visible.
 
@@ -221,15 +221,15 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [X] T023 [US4] Extend `tests/integration/dead-letter.repository.integration.spec.ts`:
+- [x] T023 [US4] Extend `tests/integration/dead-letter.repository.integration.spec.ts`:
   - **concurrency**: seed 2 due rows; start `processNextDue` A and B concurrently, each handler recording its row id and awaiting a shared barrier promise; while both are held, a third call C returns `false`; release the barrier; assert A ≠ B, both rows updated once (`retryCount` exactly 1), for both repositories;
   - **crash release**: a handler that throws → the row is immediately claimable again by a new call;
   - **no double processing in a cycle**: after a transient update (`nextRetryAt` in the future), an immediate second `processNextDue` returns `false`.
-- [X] T024 [P] [US4] Extend `tests/component/dead-letter-retry.component.spec.ts`: start a **second** `DeadLetterRetryWorker` instance (resolve a second instance from the module, or construct it with the same dependencies) on 4 due outbound rows. Assert each row ends `RESOLVED` with `retryCount` 1, and the observer sees each `eventId` exactly once.
+- [x] T024 [P] [US4] Extend `tests/component/dead-letter-retry.component.spec.ts`: start a **second** `DeadLetterRetryWorker` instance (resolve a second instance from the module, or construct it with the same dependencies) on 4 due outbound rows. Assert each row ends `RESOLVED` with `retryCount` 1, and the observer sees each `eventId` exactly once.
 
 ### Implementation
 
-- [X] T025 [US4] Verify T009's `processNextDue` satisfies T023/T024 (`FOR UPDATE SKIP LOCKED`, lock held during the handler, rollback on throw). Fix it in the repositories if not. No new code expected.
+- [x] T025 [US4] Verify T009's `processNextDue` satisfies T023/T024 (`FOR UPDATE SKIP LOCKED`, lock held during the handler, rollback on throw). Fix it in the repositories if not. No new code expected.
 
 **Checkpoint**: multi-instance safety is proven.
 
@@ -237,7 +237,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [X] T026 [P] Create `docs/dead-letter-retry.md`:
+- [x] T026 [P] Create `docs/dead-letter-retry.md`:
   - the two stores and what lands in each;
   - the status state machine;
   - `retryCount` vs `attempts`, and the `RETRIES_EXHAUSTED` failure type vs the `EXHAUSTED` status;
@@ -247,12 +247,12 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
   - at-least-once delivery and the unchanged `eventId`;
   - inbound routing by topic;
   - how to inspect the stores (SQL examples), and the out-of-scope list (no admin API, purge or replay).
-- [X] T027 [P] Create `docs/adr/0005-dead-letter-retry.md` (template: Context / Decision / Consequences): per-row transaction with `SKIP LOCKED` and no lease; the self-rescheduling timer without `@nestjs/schedule`; reuse of the producer and consumer `process()`; deterministic backoff; at-least-once delivery; the remaining gap (no outbox). Add it to `docs/adr/README.md`.
-- [X] T028 [P] Update `README.md`: the "Payment outcome consumer" and read-model sections say dead letters are retried automatically; add the six `DEAD_LETTER_*` variables to the env table; link `docs/dead-letter-retry.md`.
-- [X] T029 [P] Update `CLAUDE.md`: dead-letter rules (statuses; retry via the worker; never create new dead letters from a retry; republish through `OrderEventsProducer.republish`; inbound through the consumers' `process()`) and the new env vars.
-- [X] T030 [P] Update the docs that call retry future work: `docs/read-model.md` ("Replaying them is US-08"), `docs/events/payment-processed.md` ("Replaying them is US-08"), `docs/events/order-placed.md`/`order-confirmed.md`/`order-cancelled.md` (the "Failure handling" section: rows are now retried), and `src/README.md` (add `infra/dead-letter/` to the folder table).
-- [X] T031 Run the full quality gate and `npm run test:cov`, and confirm thresholds. Run `npm run schema:generate && git diff --exit-code docs/schema.gql` (unchanged).
-- [ ] T032 Live validation per `specs/006-dead-letter-retry/quickstart.md`, on a **separate port** with `DEAD_LETTER_RETRY_INTERVAL_MS=5000`:
+- [x] T027 [P] Create `docs/adr/0005-dead-letter-retry.md` (template: Context / Decision / Consequences): per-row transaction with `SKIP LOCKED` and no lease; the self-rescheduling timer without `@nestjs/schedule`; reuse of the producer and consumer `process()`; deterministic backoff; at-least-once delivery; the remaining gap (no outbox). Add it to `docs/adr/README.md`.
+- [x] T028 [P] Update `README.md`: the "Payment outcome consumer" and read-model sections say dead letters are retried automatically; add the six `DEAD_LETTER_*` variables to the env table; link `docs/dead-letter-retry.md`.
+- [x] T029 [P] Update `CLAUDE.md`: dead-letter rules (statuses; retry via the worker; never create new dead letters from a retry; republish through `OrderEventsProducer.republish`; inbound through the consumers' `process()`) and the new env vars.
+- [x] T030 [P] Update the docs that call retry future work: `docs/read-model.md` ("Replaying them is US-08"), `docs/events/payment-processed.md` ("Replaying them is US-08"), `docs/events/order-placed.md`/`order-confirmed.md`/`order-cancelled.md` (the "Failure handling" section: rows are now retried), and `src/README.md` (add `infra/dead-letter/` to the folder table).
+- [x] T031 Run the full quality gate and `npm run test:cov`, and confirm thresholds. Run `npm run schema:generate && git diff --exit-code docs/schema.gql` (unchanged).
+- [x] T032 Live validation per `specs/006-dead-letter-retry/quickstart.md`, on a **separate port** with `DEAD_LETTER_RETRY_INTERVAL_MS=5000`:
   1. run the migration and check that the existing `MALFORMED` rows are `EXHAUSTED` and the `RETRIES_EXHAUSTED` row resolves on the first cycle;
   2. **broker outage**: stop `ecommerce-kafka-1`, `POST /orders`, see the `PENDING_RETRY` row with a growing `retryCount`, start Kafka, see `RESOLVED` with the same `eventId` published, and the order confirmed and projected.
 
@@ -290,3 +290,22 @@ Setup ──▶ Foundational ──▶ US1 (MVP) ──▶ US2 ──▶ US3
 3. **US3**: bounded retries with a visible `EXHAUSTED` state and logs.
 4. **US4**: proven multi-instance safety.
 5. **Polish**: docs, ADR 0005, gate, and the live outage check.
+
+## Live validation results (T032, 2026-11-12)
+
+Against `ecommerce-infra`, an instance on port 3001 with `DEAD_LETTER_RETRY_INTERVAL_MS=5000`,
+next to the dev server on port 3000 (default 30 s interval):
+
+1. **Migration and existing rows**: the 2 `MALFORMED` rows became `EXHAUSTED` and were never
+   attempted. The `RETRIES_EXHAUSTED` `OrderPlaced` row was resolved on the first cycle as a
+   projection duplicate (`retryCount 1`).
+2. **Broker outage**: `docker stop ecommerce-kafka-1` (15:31:42), then `POST /orders` → `201`
+   (order `52e8291b…`), and an `order_dead_letters` row appeared as `PENDING_RETRY`. While Kafka
+   was down, `retryCount` grew to 3 with widening gaps (the next try was +20 s), with
+   `lastError` "Connection error".
+3. `docker start ecommerce-kafka-1` (15:33:21) → the row was `RESOLVED` at 15:33:26
+   (`retryCount 4`). `orders.order-placed` holds exactly one message for the order, with the
+   original `eventId` `ce9b862a…`. Payments confirmed the order (`CONFIRMED` in PostgreSQL),
+   and GraphQL `order` returns it `CONFIRMED` from the read model.
+
+The instance was stopped by PID, and no orphaned processes remained.
