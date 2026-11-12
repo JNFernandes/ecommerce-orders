@@ -47,12 +47,28 @@ export interface GraphqlConfig {
   devTools: boolean;
 }
 
+export interface DeadLetterConfig {
+  /** Whether the dead-letter retry worker runs (`DEAD_LETTER_RETRY_ENABLED`, on unless "false"). */
+  enabled: boolean;
+  /** Pause between retry cycles in ms (`DEAD_LETTER_RETRY_INTERVAL_MS`, default 30000). */
+  intervalMs: number;
+  /** Max rows retried per store per cycle (`DEAD_LETTER_BATCH_SIZE`, default 20). */
+  batchSize: number;
+  /** First backoff delay in ms (`DEAD_LETTER_BASE_DELAY_MS`, default 5000). */
+  baseDelayMs: number;
+  /** Backoff cap in ms (`DEAD_LETTER_MAX_DELAY_MS`, default 600000). */
+  maxDelayMs: number;
+  /** Failed worker attempts before a row is EXHAUSTED (`DEAD_LETTER_MAX_RETRIES`, default 8). */
+  maxRetries: number;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
   kafka: KafkaConfig;
   readModel: ReadModelConfig;
   graphql: GraphqlConfig;
+  deadLetter: DeadLetterConfig;
 }
 
 export default (): AppConfig => ({
@@ -79,5 +95,13 @@ export default (): AppConfig => ({
   },
   graphql: {
     devTools: process.env.NODE_ENV !== 'production',
+  },
+  deadLetter: {
+    enabled: process.env.DEAD_LETTER_RETRY_ENABLED !== 'false',
+    intervalMs: parseInt(process.env.DEAD_LETTER_RETRY_INTERVAL_MS ?? '30000', 10),
+    batchSize: parseInt(process.env.DEAD_LETTER_BATCH_SIZE ?? '20', 10),
+    baseDelayMs: parseInt(process.env.DEAD_LETTER_BASE_DELAY_MS ?? '5000', 10),
+    maxDelayMs: parseInt(process.env.DEAD_LETTER_MAX_DELAY_MS ?? '600000', 10),
+    maxRetries: parseInt(process.env.DEAD_LETTER_MAX_RETRIES ?? '8', 10),
   },
 });

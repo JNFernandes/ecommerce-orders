@@ -30,6 +30,7 @@ import { buildGraphqlOptions } from './graphql/graphql.config';
 import { OrdersResolver } from './controllers/orders.resolver';
 import { ListOrdersService } from './services/list-orders.service';
 import { GetOrderService } from './services/get-order.service';
+import { DeadLetterRetryWorker } from './infra/dead-letter/dead-letter-retry.worker';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { GetOrderService } from './services/get-order.service';
     ListOrdersService,
     GetOrderService,
     OrdersResolver,
+    DeadLetterRetryWorker,
   ],
 })
 export class AppModule {}

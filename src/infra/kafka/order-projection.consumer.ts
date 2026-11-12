@@ -29,6 +29,9 @@ export class OrderProjectionConsumer implements OnApplicationBootstrap, OnApplic
   private readonly config: KafkaConfig;
   private readonly consumer: Consumer;
 
+  /** The topics this consumer owns (also used to route inbound dead-letter retries). */
+  readonly topics: readonly string[] = [...ORDER_EVENT_TOPICS];
+
   constructor(
     @Inject(KAFKA_CLIENT) kafka: Kafka,
     configService: ConfigService,
@@ -63,7 +66,7 @@ export class OrderProjectionConsumer implements OnApplicationBootstrap, OnApplic
 
   private async start(): Promise<void> {
     await this.consumer.connect();
-    await this.consumer.subscribe({ topics: [...ORDER_EVENT_TOPICS], fromBeginning: true });
+    await this.consumer.subscribe({ topics: [...this.topics], fromBeginning: true });
     await this.consumer.run({
       autoCommit: false,
       eachMessage: (payload) => this.handleMessage(payload),
@@ -103,5 +106,14 @@ export class OrderProjectionConsumer implements OnApplicationBootstrap, OnApplic
         ]),
       logger: this.logger,
     });
+  }
+
+  /**
+   * Parses and projects one event exactly once: no retry, no dead letter, no commit. Used by the
+   * dead-letter retry worker, so retries go through the same parsing and the same idempotent
+   * projection as live consumption. Throws MalformedMessageError for poison messages.
+   */
+  async process(topic: string, value: Buffer | null): Promise<void> {
+    await this.projectionService.project(parseOrderEventMessage(topic, value));
   }
 }

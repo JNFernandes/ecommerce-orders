@@ -45,10 +45,11 @@ Unknown extra fields are ignored. The message key (set by Payments to the paymen
 | `PENDING` | → `CANCELLED` with `cancellationReason = reason`, through the same write flow as `POST /orders/:id/cancel` | exactly one `OrderCancelled`, with `reason` |
 | `CANCELLED` | nothing (`IGNORED_ALREADY_CANCELLED`) | none |
 | `CONFIRMED` | nothing, plus a warning log (`IGNORED_CONFLICT`) | none |
-| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) | none |
+| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) and retried later by the dead-letter worker | none |
 
 ## Delivery guarantees
 
 Identical to [payment-processed.md](payment-processed.md#delivery-guarantees): dedupe by
 `eventId`, offsets committed only after the outcome is saved, malformed messages dead-lettered
-immediately, and other failures retried with backoff and then dead-lettered.
+immediately, and other failures retried with backoff, dead-lettered, then retried by the
+dead-letter worker ([dead-letter-retry.md](../dead-letter-retry.md)).

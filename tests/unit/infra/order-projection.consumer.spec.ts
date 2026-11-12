@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { MalformedMessageError } from '../../../src/infra/kafka/malformed-message.error';
 import { ConfigService } from '@nestjs/config';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
 import { OrderProjectionConsumer } from '../../../src/infra/kafka/order-projection.consumer';
@@ -165,5 +166,43 @@ describe('OrderProjectionConsumer', () => {
     expect(project).toHaveBeenCalledTimes(3);
     expect(deadLetters.recordRetriesExhausted).not.toHaveBeenCalled();
     expect(kafkaConsumer.commitOffsets).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderProjectionConsumer.process (dead-letter retry entry point)', () => {
+  it('should list the order topics it owns', () => {
+    expect(build().consumer.topics).toEqual([
+      'orders.order-placed',
+      'orders.order-confirmed',
+      'orders.order-cancelled',
+    ]);
+  });
+
+  it('should parse and project once, without retrying, dead-lettering or committing', async () => {
+    const project = jest.fn().mockResolvedValue('applied');
+    const { consumer, kafkaConsumer, deadLetters } = build(project);
+
+    await consumer.process(ORDER_PLACED_TOPIC, placedValue());
+
+    expect(project).toHaveBeenCalledTimes(1);
+    expect(project.mock.calls[0][0]).toMatchObject({ eventId: EVENT_ID, orderId: ORDER_ID });
+    expect(kafkaConsumer.commitOffsets).not.toHaveBeenCalled();
+    expect(deadLetters.recordMalformed).not.toHaveBeenCalled();
+    expect(deadLetters.recordRetriesExhausted).not.toHaveBeenCalled();
+  });
+
+  it('should reject a malformed value with MalformedMessageError', async () => {
+    await expect(build().consumer.process(ORDER_PLACED_TOPIC, null)).rejects.toBeInstanceOf(
+      MalformedMessageError,
+    );
+  });
+
+  it('should propagate a projection error after a single attempt', async () => {
+    const project = jest.fn().mockRejectedValue(new ReadModelUnavailableError('down'));
+
+    await expect(
+      build(project).consumer.process(ORDER_PLACED_TOPIC, placedValue()),
+    ).rejects.toThrow(ReadModelUnavailableError);
+    expect(project).toHaveBeenCalledTimes(1);
   });
 });

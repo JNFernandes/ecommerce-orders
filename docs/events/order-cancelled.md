@@ -27,7 +27,7 @@ Constitution Principle III / VII), and never emitted at all if the order wasn't 
 
 | Field | Type | Semantics |
 |---|---|---|
-| `eventId` | UUID | Unique per publish attempt; used as the dead-letter record key on failure. |
+| `eventId` | UUID | Unique per event. A dead-letter retry republishes the **same** `eventId`, so consumers can deduplicate. |
 | `occurredAt` | ISO 8601 string | Timestamp the order was cancelled (`Order.updatedAt` at the time of cancellation). |
 | `aggregateId` | UUID | The `Order.id` this event describes. |
 | `version` | integer | Event schema version. Currently `1`. A breaking payload change requires a new topic version (`orders.order-cancelled.v2`), not a change to this payload. |
@@ -41,7 +41,7 @@ needs that detail should already have it from the earlier `OrderPlaced` event fo
 ## Failure handling
 
 If publishing fails after the DB status update has already succeeded, the failure is logged and
-the full event payload is stored in the `order_dead_letters` table for later retry. For a REST
+the full event payload is stored in the `order_dead_letters` table and republished automatically by the dead-letter worker, with the same `eventId`, once Kafka accepts it (see [dead-letter-retry.md](../dead-letter-retry.md)). For a REST
 cancellation the client still receives `200 OK`; for a payment-driven one the payment message
 still counts as processed. In both cases the cancellation itself was durably saved, and only the
 notification to other systems is delayed.
