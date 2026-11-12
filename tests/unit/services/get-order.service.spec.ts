@@ -44,6 +44,12 @@ describe('GetOrderService', () => {
     expect(findById).toHaveBeenCalledWith(ORDER_ID);
   });
 
+  it('should return null when no order has that id', async () => {
+    const findById = jest.fn().mockResolvedValue(null);
+
+    expect(await serviceWith(findById).execute(new GetOrderQuery(ORDER_ID))).toBeNull();
+  });
+
   it('should propagate read-model errors', async () => {
     const findById = jest.fn().mockRejectedValue(new ReadModelUnavailableError(new Error('down')));
 

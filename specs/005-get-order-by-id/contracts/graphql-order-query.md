@@ -57,7 +57,7 @@ There is no `errors` key. This is a normal answer, not a failure.
 ```json
 { "errors": [{ "message": "orderId must be a UUID", "path": ["order"],
                "extensions": { "code": "BAD_USER_INPUT", "validationErrors": ["orderId must be a UUID"] } }],
-  "data": null }
+  "data": { "order": null } }
 ```
 
 ## Missing argument
@@ -68,8 +68,15 @@ There is no `errors` key. This is a normal answer, not a failure.
 
 ```json
 { "errors": [{ "message": "Order data is temporarily unavailable, please retry", "path": ["order"],
-               "extensions": { "code": "SERVICE_UNAVAILABLE" } }], "data": null }
+               "extensions": { "code": "SERVICE_UNAVAILABLE" } }], "data": { "order": null } }
 ```
+
+## Telling "not found" from a failure
+
+`order` is a **nullable** field, so when it fails GraphQL nulls just that field: the data is
+`{ "order": null }` in both "not found" and failure cases. **The `errors` entry is what tells them
+apart**: "not found" has none; a malformed id or an outage always has one. Clients must check
+`errors` first. (Unlike `orders: OrdersPage!`, whose errors null the whole `data`.)
 
 ## Guarantees
 

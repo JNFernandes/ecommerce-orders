@@ -107,15 +107,15 @@ No setup work: no new dependencies, configuration or migration (plan.md).
 
 ### Tests (write first)
 
-- [ ] T009 [P] [US2] Extend `tests/unit/services/get-order.service.spec.ts`: `findById` resolves `null`, so `execute` returns `null`. Extend `tests/unit/controllers/orders.resolver.spec.ts`: when the query result is `null`, `order()` returns `null` without calling `OrderType.fromView`.
-- [ ] T010 [US2] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
+- [X] T009 [P] [US2] Extend `tests/unit/services/get-order.service.spec.ts`: `findById` resolves `null`, so `execute` returns `null`. Extend `tests/unit/controllers/orders.resolver.spec.ts`: when the query result is `null`, `order()` returns `null` without calling `OrderType.fromView`.
+- [X] T010 [US2] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
   - `order(orderId: "99999999-9999-4999-8999-999999999999")` → the response body is `{ data: { order: null } }` and `body.errors` is undefined;
-  - in the existing `describe('GraphQL orders query (integration, MongoDB unavailable)')`, add a case: with the container stopped, `order(orderId: <uuid>)` → one error with `extensions.code === 'SERVICE_UNAVAILABLE'`, the generic message, and `data` null (not `{ order: null }`).
-- [ ] T011 [US2] Extend `tests/component/list-orders.component.spec.ts`: `order(orderId: <random uuid>)` → `data.order === null` with no errors.
+  - in the existing `describe('GraphQL orders query (integration, MongoDB unavailable)')`, add a case: with the container stopped, `order(orderId: <uuid>)` → one error with `extensions.code === 'SERVICE_UNAVAILABLE'`, the generic message. (`data` is `{ order: null }` because the field is nullable; the error entry is what distinguishes it from not-found.)
+- [X] T011 [US2] Extend `tests/component/list-orders.component.spec.ts`: `order(orderId: <random uuid>)` → `data.order === null` with no errors.
 
 ### Implementation
 
-- [ ] T012 [US2] Verify that T007/T008 already satisfy T009–T011 (a `null` passthrough; the outage handled by the existing filter). If any case fails, fix it in `src/services/get-order.service.ts` or `src/controllers/orders.resolver.ts` without adding error handling to the resolver.
+- [X] T012 [US2] Verify that T007/T008 already satisfy T009–T011 (a `null` passthrough; the outage handled by the existing filter). If any case fails, fix it in `src/services/get-order.service.ts` or `src/controllers/orders.resolver.ts` without adding error handling to the resolver.
 
 **Checkpoint**: not-found and outage are clearly told apart.
 
@@ -131,7 +131,7 @@ No setup work: no new dependencies, configuration or migration (plan.md).
 
 - [ ] T013 [P] [US3] Unit tests in `tests/unit/dto/get-order.args.spec.ts` (`plainToInstance` + `validate`): a lowercase UUID is valid; an uppercase UUID is valid; `'abc'`, `''` and `'123'` are invalid on `orderId`.
 - [ ] T014 [US3] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
-  - `order(orderId: "abc")` → `BAD_USER_INPUT`, message `orderId must be a UUID`, `validationErrors` `['orderId must be a UUID']`, `data` null;
+  - `order(orderId: "abc")` → `BAD_USER_INPUT`, message `orderId must be a UUID`, `validationErrors` `['orderId must be a UUID']`, `data` `{ order: null }` (nullable field);
   - `{ order { orderId } }` → `GRAPHQL_VALIDATION_FAILED`, with the message mentioning `orderId`;
   - a valid `order(...)` right after succeeds.
 

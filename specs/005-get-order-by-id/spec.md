@@ -121,7 +121,9 @@ saying the order id must be a UUID, and no data. A valid query sent right after 
   not a UUID MUST produce a GraphQL error with code `BAD_USER_INPUT` naming `orderId`, with no
   data and no crash.
 - **FR-006**: If the read model is unreachable, the query MUST fail with the same
-  `SERVICE_UNAVAILABLE` error as the list query, never return `null`.
+  `SERVICE_UNAVAILABLE` error as the list query, never a `null` without an error. *(Clarified in
+  implementation: because `order` is nullable, GraphQL also sets `data.order` to `null` when it
+  fails; the `errors` entry is what distinguishes a failure from "not found".)*
 
 **Read-path architecture (Constitution Principle II)**
 

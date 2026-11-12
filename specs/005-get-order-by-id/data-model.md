@@ -53,6 +53,8 @@ type Query {
 |---|---|
 | Existing id (any case) | `{ "data": { "order": { … } } }` |
 | Unknown valid UUID | `{ "data": { "order": null } }` with **no** `errors` key |
-| `orderId: "abc"` | `errors[0].extensions.code = BAD_USER_INPUT`, message `orderId must be a UUID`, `data: null` |
+| `orderId: "abc"` | `errors[0].extensions.code = BAD_USER_INPUT`, message `orderId must be a UUID`, `data: { order: null }` |
 | `orderId` missing | `GRAPHQL_VALIDATION_FAILED` (`ID!` required) |
-| Read model unreachable | `SERVICE_UNAVAILABLE`, generic message, `data: null` |
+| Read model unreachable | `SERVICE_UNAVAILABLE`, generic message, `data: { order: null }` |
+
+`order` is nullable, so an error nulls only that field; the presence of `errors` is what distinguishes a failure from "not found".

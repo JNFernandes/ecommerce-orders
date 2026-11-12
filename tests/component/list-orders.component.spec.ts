@@ -290,4 +290,8 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
       expect(found?.confirmedAt).toEqual(expect.any(String));
     });
   });
+
+  it('should return null for an order id that does not exist', async () => {
+    expect(await getOrder(randomUUID())).toBeNull();
+  });
 });

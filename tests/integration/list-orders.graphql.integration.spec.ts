@@ -249,6 +249,12 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
       expect(body.data?.order?.orderId).toBe(orderId(5));
     });
 
+    it('should return null with no errors entry for an unknown order id', async () => {
+      const body = await order('99999999-9999-4999-8999-999999999999');
+
+      expect(body).toEqual({ data: { order: null } });
+    });
+
     it('should return a cancelled order with its cancellation reason', async () => {
       const body = await order(orderId(9));
 
@@ -407,6 +413,25 @@ describe('GraphQL orders query (integration, MongoDB unavailable)', () => {
     expect(JSON.stringify(body)).not.toMatch(
       /stacktrace|mongodb:\/\/|ECONNREFUSED|Authentication/i,
     );
+    await app.close().catch(() => undefined);
+  });
+
+  it('should answer an order lookup during an outage with a SERVICE_UNAVAILABLE error, not a silent null', async () => {
+    const container = await new MongoDBContainer('mongo:7').start();
+    const app = await buildGraphqlTestingApp(mongoUri(container.getConnectionString(), 'outage2'));
+    await container.stop();
+
+    const response = await request(app.getHttpServer())
+      .post('/graphql')
+      .send({ query: '{ order(orderId: "99999999-9999-4999-8999-999999999999") { orderId } }' });
+    const body = response.body as GqlResponse<{ order: OrderResult | null }>;
+
+    // `order` is nullable, so GraphQL nulls just that field — what distinguishes an outage from
+    // "not found" is the errors entry (a not-found answer has none).
+    expect(body.data).toEqual({ order: null });
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors?.[0].extensions?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(body.errors?.[0].message).toBe('Order data is temporarily unavailable, please retry');
     await app.close().catch(() => undefined);
   });
 });

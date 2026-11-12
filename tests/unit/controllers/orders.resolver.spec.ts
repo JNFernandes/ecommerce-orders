@@ -5,6 +5,7 @@ import { ListOrdersQuery } from '../../../src/queries/list-orders.query';
 import { ListOrdersArgs } from '../../../src/dto/graphql/list-orders.args';
 import { GetOrderArgs } from '../../../src/dto/graphql/get-order.args';
 import { GetOrderQuery } from '../../../src/queries/get-order.query';
+import { OrderType } from '../../../src/dto/graphql/order.type';
 import { OrderView } from '../../../src/read-model/order-view';
 import { OrderViewStatus } from '../../../src/read-model/order-view-status.enum';
 
@@ -117,5 +118,18 @@ describe('OrdersResolver.order', () => {
     expect(order?.totalAmount).toBe(5);
     expect(order).not.toHaveProperty('appliedEventIds');
     expect(order).not.toHaveProperty('updatedAt');
+  });
+
+  it('should return null, without mapping, when the order is not found', async () => {
+    const fromView = jest.spyOn(OrderType, 'fromView');
+    const resolver = new OrdersResolver({
+      execute: jest.fn().mockResolvedValue(null),
+    } as unknown as QueryBus);
+
+    const order = await resolver.order(getArgs(VIEW.orderId));
+
+    expect(order).toBeNull();
+    expect(fromView).not.toHaveBeenCalled();
+    fromView.mockRestore();
   });
 });
