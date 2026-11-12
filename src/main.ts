@@ -8,6 +8,9 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
   configureApp(app);
+  // Run onModuleDestroy / onApplicationShutdown on SIGTERM/SIGINT so the Kafka consumers and the
+  // dead-letter retry worker stop cleanly in production (tests close their apps explicitly).
+  app.enableShutdownHooks();
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('ecommerce-orders')

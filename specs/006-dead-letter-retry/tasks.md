@@ -45,8 +45,8 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `DeadLetterConfig { enabled; intervalMs; batchSize; baseDelayMs; maxDelayMs; maxRetries }` to `src/config/configuration.ts` (`deadLetter` in `AppConfig`), with JSDoc. Read `DEAD_LETTER_RETRY_ENABLED` (on unless `"false"`), `DEAD_LETTER_RETRY_INTERVAL_MS` (30000), `DEAD_LETTER_BATCH_SIZE` (20), `DEAD_LETTER_BASE_DELAY_MS` (5000), `DEAD_LETTER_MAX_DELAY_MS` (600000) and `DEAD_LETTER_MAX_RETRIES` (8). Append them, with defaults, under a `# Dead-letter retry (US-08)` comment in `.env.example` and the local `.env`. Update the existing unit-test `KafkaConfig`/`AppConfig` fixtures only if they stop type-checking.
-- [ ] T002 [P] Call `app.enableShutdownHooks()` in `configureApp` in `src/app.setup.ts` (research R8), with a JSDoc line explaining that SIGTERM/SIGINT must run `onModuleDestroy`/`onApplicationShutdown` (consumers, worker).
+- [X] T001 Add `DeadLetterConfig { enabled; intervalMs; batchSize; baseDelayMs; maxDelayMs; maxRetries }` to `src/config/configuration.ts` (`deadLetter` in `AppConfig`), with JSDoc. Read `DEAD_LETTER_RETRY_ENABLED` (on unless `"false"`), `DEAD_LETTER_RETRY_INTERVAL_MS` (30000), `DEAD_LETTER_BATCH_SIZE` (20), `DEAD_LETTER_BASE_DELAY_MS` (5000), `DEAD_LETTER_MAX_DELAY_MS` (600000) and `DEAD_LETTER_MAX_RETRIES` (8). Append them, with defaults, under a `# Dead-letter retry (US-08)` comment in `.env.example` and the local `.env`. Update the existing unit-test `KafkaConfig`/`AppConfig` fixtures only if they stop type-checking.
+- [X] T002 [P] Call `app.enableShutdownHooks()` in `configureApp` in `src/app.setup.ts` (research R8), with a JSDoc line explaining that SIGTERM/SIGINT must run `onModuleDestroy`/`onApplicationShutdown` (consumers, worker).
 
 ---
 
