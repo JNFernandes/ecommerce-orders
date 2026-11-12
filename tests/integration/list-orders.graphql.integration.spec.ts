@@ -215,6 +215,50 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
     });
   });
 
+  describe('order by id (US7)', () => {
+    const ORDER_QUERY = `query ($id: ID!) { order(orderId: $id) { ${ORDER_FIELDS} } }`;
+
+    async function order(id: string): Promise<GqlResponse<{ order: OrderResult | null }>> {
+      return gql<{ order: OrderResult | null }>(ORDER_QUERY, { id });
+    }
+
+    it('should return the order with exactly the values the list shows for it', async () => {
+      const fromList = (await orders('limit: 1, offset: 3')).items[0];
+
+      const body = await order(fromList.orderId);
+
+      expect(body.errors).toBeUndefined();
+      expect(body.data?.order).toEqual(fromList);
+    });
+
+    it('should return an order known only from a terminal event with null placement data', async () => {
+      const body = await order(orderId(8));
+
+      expect(body.data?.order).toMatchObject({
+        orderId: orderId(8),
+        status: 'CONFIRMED',
+        items: null,
+        totalAmount: null,
+        placedAt: null,
+      });
+    });
+
+    it('should find the order when the id is given in uppercase', async () => {
+      const body = await order(orderId(5).toUpperCase());
+
+      expect(body.data?.order?.orderId).toBe(orderId(5));
+    });
+
+    it('should return a cancelled order with its cancellation reason', async () => {
+      const body = await order(orderId(9));
+
+      expect(body.data?.order).toMatchObject({
+        status: 'CANCELLED',
+        cancellationReason: 'Amount exceeds threshold',
+      });
+    });
+  });
+
   describe('filtering (US2)', () => {
     it('should return only orders in the requested status', async () => {
       const page = await orders('status: CANCELLED');

@@ -3,6 +3,8 @@ import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { OrdersResolver } from '../../../src/controllers/orders.resolver';
 import { ListOrdersQuery } from '../../../src/queries/list-orders.query';
 import { ListOrdersArgs } from '../../../src/dto/graphql/list-orders.args';
+import { GetOrderArgs } from '../../../src/dto/graphql/get-order.args';
+import { GetOrderQuery } from '../../../src/queries/get-order.query';
 import { OrderView } from '../../../src/read-model/order-view';
 import { OrderViewStatus } from '../../../src/read-model/order-view-status.enum';
 
@@ -84,5 +86,36 @@ describe('OrdersResolver.orders', () => {
 
     expect(dependencies).toEqual([QueryBus]);
     expect(dependencies).not.toContain(CommandBus);
+  });
+});
+
+describe('OrdersResolver.order', () => {
+  function getArgs(orderId: string): GetOrderArgs {
+    return Object.assign(new GetOrderArgs(), { orderId });
+  }
+
+  it('should dispatch exactly one GetOrderQuery with the requested id', async () => {
+    const execute = jest.fn().mockResolvedValue(VIEW);
+    const resolver = new OrdersResolver({ execute } as unknown as QueryBus);
+
+    await resolver.order(getArgs(VIEW.orderId));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const query = execute.mock.calls[0][0] as GetOrderQuery;
+    expect(query).toBeInstanceOf(GetOrderQuery);
+    expect(query.orderId).toBe(VIEW.orderId);
+  });
+
+  it('should map the found view to a GraphQL order without read-model bookkeeping', async () => {
+    const resolver = new OrdersResolver({
+      execute: jest.fn().mockResolvedValue(VIEW),
+    } as unknown as QueryBus);
+
+    const order = await resolver.order(getArgs(VIEW.orderId));
+
+    expect(order?.orderId).toBe(VIEW.orderId);
+    expect(order?.totalAmount).toBe(5);
+    expect(order).not.toHaveProperty('appliedEventIds');
+    expect(order).not.toHaveProperty('updatedAt');
   });
 });

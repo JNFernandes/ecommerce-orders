@@ -48,8 +48,8 @@ No setup work: no new dependencies, configuration or migration (plan.md).
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-- [ ] T001 [P] Create `GetOrderArgs` (`@ArgsType()`) in `src/dto/graphql/get-order.args.ts` with `orderId: string`, `@Field(() => ID, { description: 'Order identifier (UUID, any case).' })` and `@IsUUID()`. Add JSDoc. Import only `@nestjs/graphql` and `class-validator`.
-- [ ] T002 [P] Create `GetOrderQuery` (`constructor(public readonly orderId: string)`, with JSDoc) in `src/queries/get-order.query.ts`.
+- [X] T001 [P] Create `GetOrderArgs` (`@ArgsType()`) in `src/dto/graphql/get-order.args.ts` with `orderId: string`, `@Field(() => ID, { description: 'Order identifier (UUID, any case).' })` and `@IsUUID()`. Add JSDoc. Import only `@nestjs/graphql` and `class-validator`.
+- [X] T002 [P] Create `GetOrderQuery` (`constructor(public readonly orderId: string)`, with JSDoc) in `src/queries/get-order.query.ts`.
 
 **Checkpoint**: the build is green.
 
@@ -63,30 +63,30 @@ No setup work: no new dependencies, configuration or migration (plan.md).
 
 ### Tests (write first)
 
-- [ ] T003 [P] [US1] Unit tests in `tests/unit/services/get-order.service.spec.ts` (mock `OrderViewRepository.findById`):
+- [X] T003 [P] [US1] Unit tests in `tests/unit/services/get-order.service.spec.ts` (mock `OrderViewRepository.findById`):
   - found → returns `stored.view` (not the `{ view, revision }` wrapper);
   - an uppercase id → `findById` is called with the lowercase id;
   - `ReadModelUnavailableError` from the repository propagates.
-- [ ] T004 [P] [US1] Extend `tests/unit/controllers/orders.resolver.spec.ts` (`describe('OrdersResolver.order')`):
+- [X] T004 [P] [US1] Extend `tests/unit/controllers/orders.resolver.spec.ts` (`describe('OrdersResolver.order')`):
   - `order(args)` executes exactly one `GetOrderQuery` with `args.orderId`;
   - it maps a returned view with `OrderType.fromView`, with no bookkeeping keys;
   - the resolver still depends only on `QueryBus` (the existing assertion keeps passing).
-- [ ] T005 [US1] Extend `tests/integration/support/read-model-testing.ts` (`buildGraphqlTestingApp`): add `GetOrderService` to `providers`. In `tests/integration/list-orders.graphql.integration.spec.ts`, add `describe('order by id (US7)')` using the seeded views:
+- [X] T005 [US1] Extend `tests/integration/support/read-model-testing.ts` (`buildGraphqlTestingApp`): add `GetOrderService` to `providers`. In `tests/integration/list-orders.graphql.integration.spec.ts`, add `describe('order by id (US7)')` using the seeded views:
   - `order(orderId: <id of view 5>)` deep-equals `orders(limit: 1, offset: 3).items[0]` (same field set);
   - the order known only from a terminal event (view 8) returns `items`/`totalAmount`/`placedAt` null and status `CONFIRMED`;
   - the same id in uppercase (`orderId(5).toUpperCase()`) returns that order;
   - a `CANCELLED` order (view 9) shows `cancellationReason`.
 
   Use a variables-based query: `query ($id: ID!) { order(orderId: $id) { …ORDER_FIELDS } }`.
-- [ ] T006 [US1] Extend `tests/component/list-orders.component.spec.ts`:
+- [X] T006 [US1] Extend `tests/component/list-orders.component.spec.ts`:
   - add `GetOrderService` to `providers`;
   - new case: place an order via `POST /orders`, poll `order(orderId)` over GraphQL (≤ 30s) until `status: PENDING` with its items and total;
   - `POST /orders/:id/confirm`, then poll until `status: CONFIRMED` with `confirmedAt`.
 
 ### Implementation
 
-- [ ] T007 [US1] Create `GetOrderService` (`@QueryHandler(GetOrderQuery)`, `implements IQueryHandler<GetOrderQuery, OrderView | null>`) in `src/services/get-order.service.ts`. `execute` returns `(await this.repository.findById(query.orderId.toLowerCase()))?.view ?? null`. Add JSDoc stating it reads the read model only, and why the id is lowercased. Register it in `src/app.module.ts` providers. Makes T003 pass.
-- [ ] T008 [US1] Add to `OrdersResolver` in `src/controllers/orders.resolver.ts`:
+- [X] T007 [US1] Create `GetOrderService` (`@QueryHandler(GetOrderQuery)`, `implements IQueryHandler<GetOrderQuery, OrderView | null>`) in `src/services/get-order.service.ts`. `execute` returns `(await this.repository.findById(query.orderId.toLowerCase()))?.view ?? null`. Add JSDoc stating it reads the read model only, and why the id is lowercased. Register it in `src/app.module.ts` providers. Makes T003 pass.
+- [X] T008 [US1] Add to `OrdersResolver` in `src/controllers/orders.resolver.ts`:
 
   ```
   @Query(() => OrderType, { name: 'order', nullable: true, description: 'Gets one order from the read model by id, or null when no order has that id. Eventually consistent: an order that was just placed may briefly return null until it has been projected.' })

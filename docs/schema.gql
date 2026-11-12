@@ -84,6 +84,14 @@ type OrdersPage {
 
 type Query {
   """
+  Gets one order from the read model by id, or null when no order has that id. Eventually consistent: an order that was just placed may briefly return null until it has been projected.
+  """
+  order(
+    """Order identifier (UUID, any case)."""
+    orderId: ID!
+  ): Order
+
+  """
   Lists orders from the read model, newest first (orders without a placement time last). Eventually consistent: a just-placed order may take a moment to appear.
   """
   orders(

@@ -4,6 +4,9 @@ import { QueryBus } from '@nestjs/cqrs';
 import { OrderType } from '../dto/graphql/order.type';
 import { OrdersPageType } from '../dto/graphql/orders-page.type';
 import { ListOrdersArgs } from '../dto/graphql/list-orders.args';
+import { GetOrderArgs } from '../dto/graphql/get-order.args';
+import { GetOrderQuery } from '../queries/get-order.query';
+import { OrderView } from '../read-model/order-view';
 import { ListOrdersQuery } from '../queries/list-orders.query';
 import { ListOrdersResult } from '../services/list-orders.service';
 import { OrderViewFilter } from '../read-model/order-view.repository';
@@ -42,5 +45,20 @@ export class OrdersResolver {
     page.totalCount = result.totalCount;
     page.hasNextPage = result.hasNextPage;
     return page;
+  }
+
+  @Query(() => OrderType, {
+    name: 'order',
+    nullable: true,
+    description:
+      'Gets one order from the read model by id, or null when no order has that id. ' +
+      'Eventually consistent: an order that was just placed may briefly return null until it ' +
+      'has been projected.',
+  })
+  async order(@Args() args: GetOrderArgs): Promise<OrderType | null> {
+    const view = await this.queryBus.execute<GetOrderQuery, OrderView | null>(
+      new GetOrderQuery(args.orderId),
+    );
+    return view ? OrderType.fromView(view) : null;
   }
 }
