@@ -12,6 +12,7 @@ import { KafkaConfig } from '../../config/configuration';
 import { ReactToPaymentOutcomeCommand } from '../../commands/react-to-payment-outcome.command';
 import { ConsumedMessageDeadLetterRepository } from '../../repositories/consumed-message-dead-letter.repository';
 import { consumeWithDeadLetter } from './consume-with-dead-letter';
+import { KafkaConnectLoop } from './kafka-connect-loop';
 import { KAFKA_CLIENT } from './kafka.constants';
 import {
   PAYMENT_FAILED_TOPIC,
@@ -36,6 +37,7 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
   private readonly logger = new Logger(PaymentEventsConsumer.name);
   private readonly config: KafkaConfig;
   private readonly consumer: Consumer;
+  private readonly connectLoop: KafkaConnectLoop;
 
   /** The topics this consumer owns (also used to route inbound dead-letter retries). */
   readonly topics: readonly string[] = [PAYMENT_PROCESSED_TOPIC, PAYMENT_FAILED_TOPIC];
@@ -52,33 +54,49 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
     }
     this.config = config;
     this.consumer = kafka.consumer({ groupId: config.groupId });
+    this.connectLoop = new KafkaConnectLoop({
+      name: 'payment events consumer',
+      connect: (): Promise<void> => this.start(),
+      initialMs: config.backoffInitialMs,
+      maxMs: config.backoffMaxMs,
+      logger: this.logger,
+    });
   }
 
   /**
-   * Starts consuming in the background so a broker outage never blocks HTTP startup
-   * (kafkajs keeps retrying the connection). Does nothing when KAFKA_CONSUMER_ENABLED=false.
+   * Connects, subscribes and runs in the background, so a Kafka outage never blocks startup.
+   * A failed connect is retried with capped exponential backoff (`KafkaConnectLoop`) until it
+   * succeeds or the application shuts down. Started on bootstrap rather than module init, so
+   * the CQRS command handlers are registered before the first message is dispatched. Does
+   * nothing when KAFKA_CONSUMER_ENABLED=false.
    */
   onApplicationBootstrap(): void {
     if (!this.config.consumerEnabled) {
       this.logger.log('payment events consumer disabled (KAFKA_CONSUMER_ENABLED=false)');
       return;
     }
-    void this.start().catch((error: Error) => {
-      this.logger.error(`payment events consumer failed to start: ${error.message}`, error.stack);
-    });
+    this.connectLoop.start();
   }
 
+  /** Stops the connect loop, then disconnects. */
   async onApplicationShutdown(): Promise<void> {
+    await this.connectLoop.stop();
     await this.consumer.disconnect();
   }
 
+  /** One connect attempt; leaves the consumer disconnected if any step fails. */
   private async start(): Promise<void> {
-    await this.consumer.connect();
-    await this.consumer.subscribe({ topics: [...this.topics], fromBeginning: true });
-    await this.consumer.run({
-      autoCommit: false,
-      eachMessage: (payload) => this.handleMessage(payload),
-    });
+    try {
+      await this.consumer.connect();
+      await this.consumer.subscribe({ topics: [...this.topics], fromBeginning: true });
+      await this.consumer.run({
+        autoCommit: false,
+        eachMessage: (payload) => this.handleMessage(payload),
+      });
+    } catch (error) {
+      await this.consumer.disconnect().catch(() => undefined);
+      throw error;
+    }
     this.logger.log(
       `payment events consumer running (group ${this.config.groupId}, topics ` +
         `${PAYMENT_PROCESSED_TOPIC}, ${PAYMENT_FAILED_TOPIC})`,

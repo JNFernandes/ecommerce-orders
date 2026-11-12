@@ -14,6 +14,10 @@ Orders microservice: NestJS + TypeScript, DDD, CQRS. The source of truth for eve
 - Jest, Supertest, `@nestjs/testing`, testcontainers
 - Local infra comes from the `ecommerce-infra` repo (`docker compose up -d` there): Kafka
   `localhost:9092`, Postgres `localhost:5432`, MongoDB `localhost:27017`
+- Startup never waits for Kafka or MongoDB. The producer connects lazily on first publish
+  (memoized in `OrderEventsProducer`); consumers connect in the background through
+  `KafkaConnectLoop` (`src/infra/kafka/kafka-connect-loop.ts`). Don't add awaited
+  `connect()` calls to module factories or lifecycle hooks.
 
 ## Commands
 
@@ -79,6 +83,9 @@ warning (`--max-warnings 0`), or a formatting violation.
   consumer is an inbound adapter: parse a DTO, dispatch a command, commit. No business logic.
 - Every consumer goes through `consumeWithDeadLetter` (`src/infra/kafka/`). A store outage
   (e.g. `ReadModelUnavailableError`) is `isFatal`: rethrown, not dead-lettered, not committed.
+- Kafka latency env: `KAFKA_CONNECTION_TIMEOUT_MS` (1000) and `KAFKA_PRODUCER_RETRIES` (1) bound a
+  failed publish to about 3 s. They apply to the producer's own kafkajs client only; the
+  consumers' client keeps kafkajs's default retries.
 - Consumer env: `KAFKA_GROUP_ID`, `KAFKA_PROJECTION_GROUP_ID`, `MONGO_URI`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
   `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, `PAYMENT_CONSUMER_BACKOFF_MAX_MS`.
 

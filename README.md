@@ -213,6 +213,8 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 | `DB_NAME` | `orders` | PostgreSQL database |
 | `KAFKA_BROKERS` | `localhost:9092` | Comma-separated Kafka brokers |
 | `KAFKA_CLIENT_ID` | `ecommerce-orders` | Kafka client id |
+| `KAFKA_CONNECTION_TIMEOUT_MS` | `1000` | Timeout for opening a broker connection |
+| `KAFKA_PRODUCER_RETRIES` | `1` | Producer connect/publish retries before the event is dead-lettered (bounds a failed publish to about 3 s) |
 | `KAFKA_GROUP_ID` | `ecommerce-orders-consumer` | Consumer group id of the payment events consumer |
 | `KAFKA_PROJECTION_GROUP_ID` | `ecommerce-orders-projection` | Consumer group of the read-model projection |
 | `MONGO_URI` | `mongodb://mongo_user:mongo_pass@localhost:27017/orders_read?authSource=admin` | Read-model database (MongoDB) |
@@ -229,6 +231,17 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 
 MongoDB is connected lazily: the HTTP API and the payment consumer start and keep working while
 it is down, and the projection catches up once it is back.
+
+**Startup does not require Kafka.** Nothing connects to Kafka during bootstrap:
+
+- The producer connects on the first publish. While Kafka is down, `POST /orders` (and
+  confirm/cancel) still succeed within about 3 s, and the event goes to `order_dead_letters`.
+  The [dead-letter worker](docs/dead-letter-retry.md) publishes it once Kafka is back.
+- Both consumers connect in the background. A failed connect is retried with capped exponential
+  backoff (`PAYMENT_CONSUMER_BACKOFF_*`) until it succeeds or the service shuts down.
+- The logs show one warning per failed attempt ("Kafka is unreachable") and one line when it
+  recovers ("Kafka is available again"). kafkajs's own per-retry connection errors are
+  throttled to one line per broker per minute.
 
 ## Tests
 
