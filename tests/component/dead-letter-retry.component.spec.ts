@@ -285,4 +285,18 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
     });
     expect(await dataSource.getRepository(ProcessedEventEntity).countBy({ eventId })).toBe(1);
   });
+
+  it('should retry a message that keeps failing with growing delays and exhaust it after the maximum retries', async () => {
+    const missingOrderId = randomUUID();
+    const id = await deadLetterPayment(missingOrderId, randomUUID());
+
+    await waitFor(async () => {
+      expect((await inboundRow(id)).status).toBe(DeadLetterStatus.EXHAUSTED);
+    });
+    const row = await inboundRow(id);
+    expect(row.retryCount).toBe(3);
+    expect(row.lastError).toContain(`no order ${missingOrderId} found`);
+    expect(row.lastAttemptAt).not.toBeNull();
+    expect(row.resolvedAt).toBeNull();
+  });
 });

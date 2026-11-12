@@ -199,15 +199,15 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests (write first)
 
-- [ ] T020 [P] [US3] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts` (fake timers and an injected clock):
+- [X] T020 [P] [US3] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts` (fake timers and an injected clock):
   - a row whose handler always fails is attempted on successive due times with gaps of 5s, 10s and 20s (assert the `nextRetryAt` values passed to the update), and the third failure (with `maxRetries 3`) yields `EXHAUSTED`;
   - exhaustion logs **one** `logger.error` containing the row id, `outbound`/`inbound`, topic, eventId, orderId (inbound), `retryCount` and `lastError`;
   - `RESOLVED`/`EXHAUSTED` rows are never passed to handlers (the repository contract; covered by T004, re-asserted here through the mock returning `false`).
-- [ ] T021 [US3] Extend `tests/component/dead-letter-retry.component.spec.ts`: an inbound row for a random `orderId` with `DEAD_LETTER_MAX_RETRIES=3` and `DEAD_LETTER_BASE_DELAY_MS=100` → poll until `EXHAUSTED`. Assert `retryCount = 3`, `lastError` mentions the order not being found, and `resolvedAt` is null.
+- [X] T021 [US3] Extend `tests/component/dead-letter-retry.component.spec.ts`: an inbound row for a random `orderId` with `DEAD_LETTER_MAX_RETRIES=3` and `DEAD_LETTER_BASE_DELAY_MS=100` → poll until `EXHAUSTED`. Assert `retryCount = 3`, `lastError` mentions the order not being found, and `resolvedAt` is null.
 
 ### Implementation
 
-- [ ] T022 [US3] In `src/infra/dead-letter/dead-letter-retry.worker.ts`, after `decideRetry` returns `EXHAUSTED`, log `logger.error` with full context (research R3/FR-011). Ensure the injected clock (`now: () => Date`, default `() => new Date()`) is used everywhere for fake-time testing. Makes T020 and T021 pass (the policy already exhausts).
+- [X] T022 [US3] In `src/infra/dead-letter/dead-letter-retry.worker.ts`, after `decideRetry` returns `EXHAUSTED`, log `logger.error` with full context (research R3/FR-011). Ensure the injected clock (`now: () => Date`, default `() => new Date()`) is used everywhere for fake-time testing. Makes T020 and T021 pass (the policy already exhausts).
 
 **Checkpoint**: retries are bounded and visible.
 

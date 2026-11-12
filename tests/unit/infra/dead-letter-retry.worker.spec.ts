@@ -109,6 +109,7 @@ describe('DeadLetterRetryWorker', () => {
   let paymentProcess: jest.Mock;
   let projectionProcess: jest.Mock;
   let worker: DeadLetterRetryWorker;
+  let clock: Date;
 
   function build(settings: Partial<DeadLetterConfig> = {}): DeadLetterRetryWorker {
     const config = {
@@ -127,7 +128,7 @@ describe('DeadLetterRetryWorker', () => {
         topics: ['orders.order-placed', 'orders.order-confirmed', 'orders.order-cancelled'],
         process: projectionProcess,
       } as unknown as OrderProjectionConsumer,
-      () => NOW,
+      () => clock,
     );
   }
 
@@ -137,6 +138,7 @@ describe('DeadLetterRetryWorker', () => {
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    clock = NOW;
     outbound = new FakeStore();
     inbound = new FakeStore();
     republish = jest.fn().mockResolvedValue(undefined);
@@ -359,6 +361,75 @@ describe('DeadLetterRetryWorker', () => {
       expect(outbound.updates).toHaveLength(1);
       expect(inbound.updates).toHaveLength(3);
       expect(inbound.queue).toHaveLength(1);
+    });
+  });
+
+  describe('hopeless rows', () => {
+    /** Runs a row through successive due times, applying each update like the repository does. */
+    async function attemptUntilFinal(
+      store: FakeStore<OrderDeadLetterEntity> | FakeStore<ConsumedMessageDeadLetterEntity>,
+      row: OrderDeadLetterEntity | ConsumedMessageDeadLetterEntity,
+    ): Promise<RetryUpdate[]> {
+      let current = row;
+      for (let i = 0; i < 10; i++) {
+        clock = current.nextRetryAt;
+        (store.queue as Array<typeof current>).push(current);
+        await worker.runCycle();
+        const update = store.updates[store.updates.length - 1];
+        current = { ...current, ...update };
+        if (update.status !== DeadLetterStatus.PENDING_RETRY) {
+          break;
+        }
+      }
+      return store.updates;
+    }
+
+    beforeEach(() => {
+      worker = build({ maxRetries: 3 });
+    });
+
+    it('should retry with growing gaps and exhaust after maxRetries attempts', async () => {
+      republish.mockRejectedValue(new Error('broker down'));
+
+      const updates = await attemptUntilFinal(outbound, outboundRow());
+
+      expect(republish).toHaveBeenCalledTimes(3);
+      expect(updates.map((u) => u.status)).toEqual([
+        DeadLetterStatus.PENDING_RETRY,
+        DeadLetterStatus.PENDING_RETRY,
+        DeadLetterStatus.EXHAUSTED,
+      ]);
+      expect(updates[0].nextRetryAt).toEqual(new Date(NOW.getTime() + 5_000));
+      expect(updates[1].nextRetryAt).toEqual(new Date(NOW.getTime() + 5_000 + 10_000));
+      expect(updates[2]).toMatchObject({ retryCount: 3, lastError: 'broker down' });
+    });
+
+    it('should log one error with the full context when an inbound row is exhausted', async () => {
+      paymentProcess.mockRejectedValue(new Error('order order-9 not found'));
+
+      await attemptUntilFinal(inbound, inboundRow());
+
+      expect(Logger.prototype.error).toHaveBeenCalledTimes(1);
+      const [message] = (Logger.prototype.error as jest.Mock).mock.calls[0] as [string];
+      for (const part of [
+        'in-1',
+        'inbound',
+        'payments.payment-processed',
+        'evt-9',
+        'order-9',
+        'retryCount 3',
+        'order order-9 not found',
+      ]) {
+        expect(message).toContain(part);
+      }
+    });
+
+    it('should never hand a finished row to a handler (the store returns nothing due)', async () => {
+      await worker.runCycle();
+
+      expect(republish).not.toHaveBeenCalled();
+      expect(paymentProcess).not.toHaveBeenCalled();
+      expect(projectionProcess).not.toHaveBeenCalled();
     });
   });
 });
