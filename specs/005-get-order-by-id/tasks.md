@@ -145,11 +145,11 @@ No setup work: no new dependencies, configuration or migration (plan.md).
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T016 Run `npm run schema:generate` to update `docs/schema.gql` with the `order` query. Extend `tests/unit/graphql/schema.spec.ts` with an assertion that the printed schema matches `/order\(\s*"""[^"]*"""\s*orderId: ID!\s*\): Order\n/`, i.e. a nullable `Order`. The existing drift and description tests must pass.
-- [ ] T017 [P] Update `README.md`: in the GraphQL section, add the `order(orderId)` signature and an example (found, as a variables-based query), plus the not-found response `{ "data": { "order": null } }` and the malformed-id error.
-- [ ] T018 [P] Update `CLAUDE.md`: in the read-path line, name both queries (`orders`, `order`) and note that "not found" returns `null` (not an error).
-- [ ] T019 [P] Update `src/README.md` ("Where a GraphQL query goes": add `order` → `GetOrderQuery` → `GetOrderService` → `OrderViewRepository.findById`) and `docs/read-model.md` (read by the `orders` **and** `order` queries).
-- [ ] T020 Run the full gate plus `npm run test:cov` (thresholds) and `npm run schema:generate && git diff --exit-code docs/schema.gql`.
+- [X] T016 Run `npm run schema:generate` to update `docs/schema.gql` with the `order` query. Extend `tests/unit/graphql/schema.spec.ts` with an assertion that the printed schema matches `/order\(\s*"""[^"]*"""\s*orderId: ID!\s*\): Order\n/`, i.e. a nullable `Order`. The existing drift and description tests must pass.
+- [X] T017 [P] Update `README.md`: in the GraphQL section, add the `order(orderId)` signature and an example (found, as a variables-based query), plus the not-found response `{ "data": { "order": null } }` and the malformed-id error.
+- [X] T018 [P] Update `CLAUDE.md`: in the read-path line, name both queries (`orders`, `order`) and note that "not found" returns `null` (not an error).
+- [X] T019 [P] Update `src/README.md` ("Where a GraphQL query goes": add `order` → `GetOrderQuery` → `GetOrderService` → `OrderViewRepository.findById`) and `docs/read-model.md` (read by the `orders` **and** `order` queries).
+- [X] T020 Run the full gate plus `npm run test:cov` (thresholds) and `npm run schema:generate && git diff --exit-code docs/schema.gql`.
 - [ ] T021 Live validation per `specs/005-get-order-by-id/quickstart.md` on a **separate port** (`PORT=3001 node dist/main`), so the user's dev server is not disturbed:
   - place an order, fetch it by id (`PENDING`, then `CONFIRMED`/`CANCELLED` with Payments running);
   - unknown UUID → `null` with no errors; `abc` → `BAD_USER_INPUT`; uppercase id → found.

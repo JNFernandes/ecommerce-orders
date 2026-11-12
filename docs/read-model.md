@@ -2,7 +2,7 @@
 
 The query side of CQRS in `ecommerce-orders` ([ADR 0001](adr/0001-cqrs-read-model-in-orders-service.md)).
 Every order has a **view** in MongoDB, kept up to date by a projection that consumes the
-service's own order events. It is read by the GraphQL `orders` query (US-06; see the
+service's own order events. It is read by the GraphQL `orders` (US-06) and `order` (US-07) queries (see the
 [README](../README.md#graphql-read-path)). The consistency approach is recorded in [ADR 0004](adr/0004-read-model-projection-consistency.md).
 
 ```text

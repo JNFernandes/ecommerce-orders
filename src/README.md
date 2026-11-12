@@ -9,7 +9,7 @@ at a glance.
 | Folder | Layer (per the project constitution) | Contents |
 |---|---|---|
 | `controllers/` | Controller | `OrdersController` (REST, write path) and `OrdersResolver` (GraphQL, read path) — I/O only, no business logic. (The Kafka equivalents live in `infra/kafka/`.) |
-| `queries/` | — | CQRS query objects (`ListOrdersQuery`), dispatched via `QueryBus` |
+| `queries/` | — | CQRS query objects (`ListOrdersQuery`, `GetOrderQuery`), dispatched via `QueryBus` |
 | `commands/` | — | CQRS command objects (`PlaceOrderCommand`, `CancelOrderCommand`, `ConfirmOrderCommand`, `ReactToPaymentOutcomeCommand`) and `InboundEventRef` — plain data, dispatched via `CommandBus` |
 | `services/` | Service | `PlaceOrderService`, `CancelOrderService`, `ConfirmOrderService` — orchestrate a command: call the domain, then the repository, then Kafka. `ReactToPaymentOutcomeService` — dedupes a payment event, asks the domain policy, then dispatches Confirm/Cancel or records a no-op. Each registered as a CQRS `@CommandHandler` |
 | `domain/` | Domain | `Order` aggregate (`place()`, `cancel()`, `confirm()`), `OrderItem` value object, `OrderPlaced`/`OrderCancelled`/`OrderConfirmed` events, `OrderValidationError`/`OrderCancellationError`/`OrderConfirmationError`, `decidePaymentReaction` (order status × payment outcome rule) — pure business logic, no I/O, no framework dependency |
@@ -45,7 +45,9 @@ committed only after the outcome is saved.
 `POST /graphql` → `OrdersResolver.orders` (args validated by the global `ValidationPipe`; errors
 mapped by `GraphQLUserInputFilter`) → `QueryBus` → `ListOrdersService` (`@QueryHandler`) →
 `OrderViewRepository.list()` (MongoDB `order_views`, index-backed) → mapped to GraphQL types with
-`OrderType.fromView`. No command, no PostgreSQL.
+`OrderType.fromView`. `OrdersResolver.order` (US-07) follows the same path with `GetOrderQuery` →
+`GetOrderService` → `OrderViewRepository.findById()` (by `_id`, id lower-cased), returning the
+order or `null`. No command, no PostgreSQL.
 
 ## Where an order event goes (US-05)
 
