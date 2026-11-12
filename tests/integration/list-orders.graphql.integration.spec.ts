@@ -255,6 +255,35 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
       expect(body).toEqual({ data: { order: null } });
     });
 
+    it('should reject a malformed id with BAD_USER_INPUT naming orderId', async () => {
+      const body = await gql<{ order: OrderResult | null }>(
+        '{ order(orderId: "abc") { orderId } }',
+      );
+
+      expect(body.errors).toHaveLength(1);
+      const [error] = body.errors as GqlError[];
+      expect(error.extensions?.code).toBe('BAD_USER_INPUT');
+      expect(error.message).toBe('orderId must be a UUID');
+      expect(error.extensions?.validationErrors).toEqual(['orderId must be a UUID']);
+      expect(body.data).toEqual({ order: null });
+    });
+
+    it('should reject a query without orderId through GraphQL validation', async () => {
+      const body = await gql('{ order { orderId } }');
+
+      expect(body.errors?.[0].extensions?.code).toBe('GRAPHQL_VALIDATION_FAILED');
+      expect(body.errors?.[0].message).toContain('orderId');
+    });
+
+    it('should keep answering valid lookups after a malformed one', async () => {
+      await gql('{ order(orderId: "abc") { orderId } }');
+
+      const body = await order(orderId(5));
+
+      expect(body.errors).toBeUndefined();
+      expect(body.data?.order?.orderId).toBe(orderId(5));
+    });
+
     it('should return a cancelled order with its cancellation reason', async () => {
       const body = await order(orderId(9));
 

@@ -129,15 +129,15 @@ No setup work: no new dependencies, configuration or migration (plan.md).
 
 ### Tests (write first)
 
-- [ ] T013 [P] [US3] Unit tests in `tests/unit/dto/get-order.args.spec.ts` (`plainToInstance` + `validate`): a lowercase UUID is valid; an uppercase UUID is valid; `'abc'`, `''` and `'123'` are invalid on `orderId`.
-- [ ] T014 [US3] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
+- [X] T013 [P] [US3] Unit tests in `tests/unit/dto/get-order.args.spec.ts` (`plainToInstance` + `validate`): a lowercase UUID is valid; an uppercase UUID is valid; `'abc'`, `''` and `'123'` are invalid on `orderId`.
+- [X] T014 [US3] Extend `tests/integration/list-orders.graphql.integration.spec.ts`:
   - `order(orderId: "abc")` → `BAD_USER_INPUT`, message `orderId must be a UUID`, `validationErrors` `['orderId must be a UUID']`, `data` `{ order: null }` (nullable field);
   - `{ order { orderId } }` → `GRAPHQL_VALIDATION_FAILED`, with the message mentioning `orderId`;
   - a valid `order(...)` right after succeeds.
 
 ### Implementation
 
-- [ ] T015 [US3] Verify that `GetOrderArgs` (T001), the global `ValidationPipe` and `GraphQLUserInputFilter` already produce the expected errors. If the message differs (e.g. the class-validator wording), adjust the test expectation to the actual standard message only if it still names `orderId`. Otherwise fix the decorator in `src/dto/graphql/get-order.args.ts`.
+- [X] T015 [US3] Verify that `GetOrderArgs` (T001), the global `ValidationPipe` and `GraphQLUserInputFilter` already produce the expected errors. If the message differs (e.g. the class-validator wording), adjust the test expectation to the actual standard message only if it still names `orderId`. Otherwise fix the decorator in `src/dto/graphql/get-order.args.ts`.
 
 **Checkpoint**: all three stories work.
 
