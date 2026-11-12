@@ -98,8 +98,8 @@ The projection uses the same consumer flow as the payment consumer (`consumeWith
 
 | Situation | Result | Offset |
 |---|---|---|
-| Malformed event (not JSON, bad ids, `version` ≠ 1, invalid items, …) | `consumed_message_dead_letters` row, `MALFORMED`, no retry | committed |
-| Write conflict, or an unexpected error | retried with exponential backoff, then dead-lettered (`RETRIES_EXHAUSTED`) | committed after the dead-letter write |
+| Malformed event (not JSON, bad ids, `version` ≠ 1, invalid items, …) | `consumed_message_dead_letters` row, `MALFORMED`, stored `EXHAUSTED` (never retried) | committed |
+| Write conflict, or an unexpected error | retried with exponential backoff, then dead-lettered (`RETRIES_EXHAUSTED`); the dead-letter worker projects it again later | committed after the dead-letter write |
 | **MongoDB unreachable** | retried, then **not** dead-lettered: the error is rethrown, kafkajs restarts the consumer, and the event is redelivered | **not** committed |
 
 **How an outage is detected**: known driver connectivity errors (server selection, network,
@@ -138,8 +138,9 @@ succeeds.
   delete policy, in `ecommerce-infra`). Orders whose events are older cannot be backfilled or
   rebuilt by replay. A rebuild-from-PostgreSQL job, or longer or compacted retention, is a
   possible follow-up.
-- **Unpublished events**: an `OrderPlaced` that failed to publish (in `order_dead_letters`)
-  appears in the read model only once it is republished (US-08).
+- **Unpublished events**: an event that failed to publish (in `order_dead_letters`) appears in
+  the read model only once the dead-letter worker has republished it, usually within one or two
+  retry intervals of Kafka recovering ([dead-letter-retry.md](dead-letter-retry.md)).
 
 ## Configuration
 

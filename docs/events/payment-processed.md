@@ -44,7 +44,7 @@ Unknown extra fields are ignored. The message key (set by Payments to the paymen
 | `PENDING` | → `CONFIRMED`, through the same write flow as `POST /orders/:id/confirm` | exactly one `OrderConfirmed` |
 | `CONFIRMED` | nothing (`IGNORED_ALREADY_CONFIRMED`) | none |
 | `CANCELLED` | nothing, plus a warning log (`IGNORED_CONFLICT`); any refund is a Payments concern | none |
-| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) | none |
+| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) and retried later by the dead-letter worker | none |
 
 ## Delivery guarantees
 
@@ -58,6 +58,9 @@ Unknown extra fields are ignored. The message key (set by Payments to the paymen
 - **Other failures** are retried with exponential backoff (`PAYMENT_CONSUMER_MAX_ATTEMPTS`,
   `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, `PAYMENT_CONSUMER_BACKOFF_MAX_MS`) and then dead-lettered.
 - Dead letters go to the `consumed_message_dead_letters` table, which is separate from the
-  outbound `order_dead_letters`. Replaying them is US-08.
+  outbound `order_dead_letters`. The dead-letter worker re-handles `RETRIES_EXHAUSTED` rows
+  through the same consumer logic (so dedupe still applies) with growing delays, until they
+  resolve or are marked `EXHAUSTED` ([dead-letter-retry.md](../dead-letter-retry.md)).
+  Malformed messages are stored `EXHAUSTED` and never retried.
 - If publishing `OrderConfirmed` fails after the save, the event goes to `order_dead_letters` and
   the payment message still counts as processed.

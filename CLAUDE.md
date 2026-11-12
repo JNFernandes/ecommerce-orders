@@ -81,6 +81,20 @@ warning (`--max-warnings 0`), or a formatting violation.
   (e.g. `ReadModelUnavailableError`) is `isFatal`: rethrown, not dead-lettered, not committed.
 - Consumer env: `KAFKA_GROUP_ID`, `KAFKA_PROJECTION_GROUP_ID`, `MONGO_URI`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
   `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, `PAYMENT_CONSUMER_BACKOFF_MAX_MS`.
+
+## Dead-letter retry (US-08)
+
+- Both dead-letter tables have `status` `PENDING_RETRY` / `RESOLVED` / `EXHAUSTED`, `retryCount`,
+  `nextRetryAt`, `lastAttemptAt`, `lastError`, `resolvedAt`. Malformed inbound rows are inserted
+  `EXHAUSTED`. See `docs/dead-letter-retry.md` and ADR 0005.
+- `DeadLetterRetryWorker` (`src/infra/dead-letter/`) retries them: one row per transaction via
+  `processNextDue` (`FOR UPDATE SKIP LOCKED`), decision by the pure `decideRetry`.
+- Outbound rows are republished only through `OrderEventsProducer.republish` (same `eventId`, key
+  `aggregateId`). Inbound rows go only through the owning consumer's `process()`. Never
+  duplicate their logic in the worker.
+- A retry never commits offsets and never creates a new dead letter.
+- Env: `DEAD_LETTER_RETRY_ENABLED`, `DEAD_LETTER_RETRY_INTERVAL_MS`, `DEAD_LETTER_BATCH_SIZE`,
+  `DEAD_LETTER_BASE_DELAY_MS`, `DEAD_LETTER_MAX_DELAY_MS`, `DEAD_LETTER_MAX_RETRIES`.
 - Breaking payload change → new topic version (`orders.order-placed.v2`). Document payloads in
   `docs/events/`.
 

@@ -237,7 +237,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T026 [P] Create `docs/dead-letter-retry.md`:
+- [X] T026 [P] Create `docs/dead-letter-retry.md`:
   - the two stores and what lands in each;
   - the status state machine;
   - `retryCount` vs `attempts`, and the `RETRIES_EXHAUSTED` failure type vs the `EXHAUSTED` status;
@@ -247,11 +247,11 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
   - at-least-once delivery and the unchanged `eventId`;
   - inbound routing by topic;
   - how to inspect the stores (SQL examples), and the out-of-scope list (no admin API, purge or replay).
-- [ ] T027 [P] Create `docs/adr/0005-dead-letter-retry.md` (template: Context / Decision / Consequences): per-row transaction with `SKIP LOCKED` and no lease; the self-rescheduling timer without `@nestjs/schedule`; reuse of the producer and consumer `process()`; deterministic backoff; at-least-once delivery; the remaining gap (no outbox). Add it to `docs/adr/README.md`.
-- [ ] T028 [P] Update `README.md`: the "Payment outcome consumer" and read-model sections say dead letters are retried automatically; add the six `DEAD_LETTER_*` variables to the env table; link `docs/dead-letter-retry.md`.
-- [ ] T029 [P] Update `CLAUDE.md`: dead-letter rules (statuses; retry via the worker; never create new dead letters from a retry; republish through `OrderEventsProducer.republish`; inbound through the consumers' `process()`) and the new env vars.
-- [ ] T030 [P] Update the docs that call retry future work: `docs/read-model.md` ("Replaying them is US-08"), `docs/events/payment-processed.md` ("Replaying them is US-08"), `docs/events/order-placed.md`/`order-confirmed.md`/`order-cancelled.md` (the "Failure handling" section: rows are now retried), and `src/README.md` (add `infra/dead-letter/` to the folder table).
-- [ ] T031 Run the full quality gate and `npm run test:cov`, and confirm thresholds. Run `npm run schema:generate && git diff --exit-code docs/schema.gql` (unchanged).
+- [X] T027 [P] Create `docs/adr/0005-dead-letter-retry.md` (template: Context / Decision / Consequences): per-row transaction with `SKIP LOCKED` and no lease; the self-rescheduling timer without `@nestjs/schedule`; reuse of the producer and consumer `process()`; deterministic backoff; at-least-once delivery; the remaining gap (no outbox). Add it to `docs/adr/README.md`.
+- [X] T028 [P] Update `README.md`: the "Payment outcome consumer" and read-model sections say dead letters are retried automatically; add the six `DEAD_LETTER_*` variables to the env table; link `docs/dead-letter-retry.md`.
+- [X] T029 [P] Update `CLAUDE.md`: dead-letter rules (statuses; retry via the worker; never create new dead letters from a retry; republish through `OrderEventsProducer.republish`; inbound through the consumers' `process()`) and the new env vars.
+- [X] T030 [P] Update the docs that call retry future work: `docs/read-model.md` ("Replaying them is US-08"), `docs/events/payment-processed.md` ("Replaying them is US-08"), `docs/events/order-placed.md`/`order-confirmed.md`/`order-cancelled.md` (the "Failure handling" section: rows are now retried), and `src/README.md` (add `infra/dead-letter/` to the folder table).
+- [X] T031 Run the full quality gate and `npm run test:cov`, and confirm thresholds. Run `npm run schema:generate && git diff --exit-code docs/schema.gql` (unchanged).
 - [ ] T032 Live validation per `specs/006-dead-letter-retry/quickstart.md`, on a **separate port** with `DEAD_LETTER_RETRY_INTERVAL_MS=5000`:
   1. run the migration and check that the existing `MALFORMED` rows are `EXHAUSTED` and the `RETRIES_EXHAUSTED` row resolves on the first cycle;
   2. **broker outage**: stop `ecommerce-kafka-1`, `POST /orders`, see the `PENDING_RETRY` row with a growing `retryCount`, start Kafka, see `RESOLVED` with the same `eventId` published, and the order confirmed and projected.

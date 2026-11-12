@@ -26,7 +26,11 @@ See [`src/README.md`](src/README.md) for the folder layout.
 
 - **Write path (built)**: REST → `@nestjs/cqrs` command bus → service/command handler → domain →
   PostgreSQL (TypeORM). Only **after** the save succeeds is the Kafka event published. If the
-  publish fails, the event goes to a dead-letter table and the request still succeeds.
+  publish fails, the event goes to a dead-letter table and the request still succeeds; a
+  background worker republishes it once Kafka is back (US-08).
+- **Dead-letter retry (built, US-08)**: failed publishes and unprocessable consumed messages are
+  retried automatically with capped exponential backoff, safely across instances, until they
+  resolve or are marked `EXHAUSTED`. See [docs/dead-letter-retry.md](docs/dead-letter-retry.md).
 - **Payment outcomes (built, US-04)**: a Kafka consumer reacts to `payments.payment-processed`
   and `payments.payment-failed` by dispatching the same Confirm/Cancel commands, so an order
   reaches `CONFIRMED` or `CANCELLED` with no manual call.
@@ -61,7 +65,8 @@ Payload details are in [`docs/events/`](docs/events/).
   the status change, and a redelivery changes nothing.
 - The offset is committed only after the outcome is saved. Malformed messages are dead-lettered
   immediately. Other failures (for example an unknown `orderId`) are retried with exponential
-  backoff and then dead-lettered to `consumed_message_dead_letters`.
+  backoff and then dead-lettered to `consumed_message_dead_letters`, from where the dead-letter
+  worker retries them later (malformed ones are stored `EXHAUSTED` and never retried).
 - `OrderCancelled` carries an optional `reason` when the cancellation came from a failed payment.
 - Set `KAFKA_CONSUMER_ENABLED=false` to run the HTTP API without the consumers (payment and
   read-model projection).
@@ -215,6 +220,12 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 | `PAYMENT_CONSUMER_MAX_ATTEMPTS` | `5` | Attempts before a failing event is dead-lettered (both consumers) |
 | `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS` | `1000` | First retry delay (doubles each attempt) |
 | `PAYMENT_CONSUMER_BACKOFF_MAX_MS` | `30000` | Maximum retry delay |
+| `DEAD_LETTER_RETRY_ENABLED` | `true` | Run the dead-letter retry worker (`false` disables it) |
+| `DEAD_LETTER_RETRY_INTERVAL_MS` | `30000` | Pause between retry cycles |
+| `DEAD_LETTER_BATCH_SIZE` | `20` | Maximum rows retried per store per cycle |
+| `DEAD_LETTER_BASE_DELAY_MS` | `5000` | Delay after the first failed retry (doubles each time) |
+| `DEAD_LETTER_MAX_DELAY_MS` | `600000` | Maximum delay between retries |
+| `DEAD_LETTER_MAX_RETRIES` | `8` | Retries before a dead letter is marked `EXHAUSTED` |
 
 MongoDB is connected lazily: the HTTP API and the payment consumer start and keep working while
 it is down, and the projection catches up once it is back.

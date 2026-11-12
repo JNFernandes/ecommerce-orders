@@ -26,7 +26,7 @@ producer of this event.
 
 | Field | Type | Semantics |
 |---|---|---|
-| `eventId` | UUID | Unique per publish attempt; used as the dead-letter record key on failure. |
+| `eventId` | UUID | Unique per event. A dead-letter retry republishes the **same** `eventId`, so consumers can deduplicate. |
 | `occurredAt` | ISO 8601 string | Timestamp the order was created (`Order.createdAt`). |
 | `aggregateId` | UUID | The `Order.id` this event describes. |
 | `version` | integer | Event schema version. Currently `1`. A breaking payload change requires a new topic version (`orders.order-placed.v2`), not a change to this payload. |
@@ -38,7 +38,7 @@ producer of this event.
 
 If publishing fails after the DB save has already succeeded, the failure is logged and the
 full event payload is stored in the `order_dead_letters` table (see
-`specs/001-place-order/data-model.md`) for later retry. The client still receives `201
+`specs/001-place-order/data-model.md`) and republished automatically by the dead-letter worker, with the same `eventId`, once Kafka accepts it (see [dead-letter-retry.md](../dead-letter-retry.md)). The client still receives `201
 Created`, since the order itself was saved successfully — only the notification to other
 systems is delayed.
 
