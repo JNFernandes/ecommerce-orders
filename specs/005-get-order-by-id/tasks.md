@@ -150,7 +150,7 @@ No setup work: no new dependencies, configuration or migration (plan.md).
 - [X] T018 [P] Update `CLAUDE.md`: in the read-path line, name both queries (`orders`, `order`) and note that "not found" returns `null` (not an error).
 - [X] T019 [P] Update `src/README.md` ("Where a GraphQL query goes": add `order` → `GetOrderQuery` → `GetOrderService` → `OrderViewRepository.findById`) and `docs/read-model.md` (read by the `orders` **and** `order` queries).
 - [X] T020 Run the full gate plus `npm run test:cov` (thresholds) and `npm run schema:generate && git diff --exit-code docs/schema.gql`.
-- [ ] T021 Live validation per `specs/005-get-order-by-id/quickstart.md` on a **separate port** (`PORT=3001 node dist/main`), so the user's dev server is not disturbed:
+- [X] T021 Live validation per `specs/005-get-order-by-id/quickstart.md` on a **separate port** (`PORT=3001 node dist/main`), so the user's dev server is not disturbed:
   - place an order, fetch it by id (`PENDING`, then `CONFIRMED`/`CANCELLED` with Payments running);
   - unknown UUID → `null` with no errors; `abc` → `BAD_USER_INPUT`; uppercase id → found.
 
