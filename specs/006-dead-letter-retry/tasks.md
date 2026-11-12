@@ -1,6 +1,5 @@
 ---
-
-description: "Task list for US-08 Dead-Letter Retry"
+description: 'Task list for US-08 Dead-Letter Retry'
 ---
 
 # Tasks: Dead-Letter Retry (US-08)
@@ -11,6 +10,7 @@ description: "Task list for US-08 Dead-Letter Retry"
 contracts/dead-letter-retry-behaviour.md, quickstart.md
 
 **Tests**: REQUIRED by the user's description and constitution Principles V/VI:
+
 - unit tests for the backoff and retry decisions with fake time;
 - integration tests for claiming against a PostgreSQL container;
 - a component test with real Kafka and PostgreSQL in which publishing fails first and succeeds
@@ -30,6 +30,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 `&&`, never `;`. Conventional Commits scoped `US-08`.
 
 **Reuse rule**:
+
 - republish only through `OrderEventsProducer`;
 - re-handle inbound messages only through the consumers' `process()` (the same parse and handler as
   live consumption);
@@ -45,8 +46,8 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ## Phase 1: Setup
 
-- [X] T001 Add `DeadLetterConfig { enabled; intervalMs; batchSize; baseDelayMs; maxDelayMs; maxRetries }` to `src/config/configuration.ts` (`deadLetter` in `AppConfig`), with JSDoc. Read `DEAD_LETTER_RETRY_ENABLED` (on unless `"false"`), `DEAD_LETTER_RETRY_INTERVAL_MS` (30000), `DEAD_LETTER_BATCH_SIZE` (20), `DEAD_LETTER_BASE_DELAY_MS` (5000), `DEAD_LETTER_MAX_DELAY_MS` (600000) and `DEAD_LETTER_MAX_RETRIES` (8). Append them, with defaults, under a `# Dead-letter retry (US-08)` comment in `.env.example` and the local `.env`. Update the existing unit-test `KafkaConfig`/`AppConfig` fixtures only if they stop type-checking.
-- [X] T002 [P] Call `app.enableShutdownHooks()` in `configureApp` in `src/app.setup.ts` (research R8), with a JSDoc line explaining that SIGTERM/SIGINT must run `onModuleDestroy`/`onApplicationShutdown` (consumers, worker).
+- [x] T001 Add `DeadLetterConfig { enabled; intervalMs; batchSize; baseDelayMs; maxDelayMs; maxRetries }` to `src/config/configuration.ts` (`deadLetter` in `AppConfig`), with JSDoc. Read `DEAD_LETTER_RETRY_ENABLED` (on unless `"false"`), `DEAD_LETTER_RETRY_INTERVAL_MS` (30000), `DEAD_LETTER_BATCH_SIZE` (20), `DEAD_LETTER_BASE_DELAY_MS` (5000), `DEAD_LETTER_MAX_DELAY_MS` (600000) and `DEAD_LETTER_MAX_RETRIES` (8). Append them, with defaults, under a `# Dead-letter retry (US-08)` comment in `.env.example` and the local `.env`. Update the existing unit-test `KafkaConfig`/`AppConfig` fixtures only if they stop type-checking.
+- [x] T002 [P] Call `app.enableShutdownHooks()` in `configureApp` in `src/app.setup.ts` (research R8), with a JSDoc line explaining that SIGTERM/SIGINT must run `onModuleDestroy`/`onApplicationShutdown` (consumers, worker).
 
 ---
 
@@ -56,7 +57,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Tests first
 
-- [ ] T003 [P] Unit tests in `tests/unit/infra/retry-policy.spec.ts` (fake `now`, settings `base 5000, max 600000, maxRetries 8`):
+- [x] T003 [P] Unit tests in `tests/unit/infra/retry-policy.spec.ts` (fake `now`, settings `base 5000, max 600000, maxRetries 8`):
   - `deadLetterDelay(1..8)` = 5000, 10000, 20000, 40000, 80000, 160000, 320000, 600000 (the cap); with `maxDelayMs 30000`, retry 4 is capped at 30000;
   - `decideRetry` success → `RESOLVED`, `resolvedAt = now`, `lastAttemptAt = now`, `lastError = null`, `retryCount + 1`;
   - permanent → `EXHAUSTED`, `retryCount + 1`, with the error;
@@ -64,7 +65,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
   - transient at `retryCount 6` → `PENDING_RETRY`, `7`, `+320000`;
   - transient at `retryCount 7` → `EXHAUSTED`, `8`;
   - `nextRetryAt` is unchanged on `RESOLVED`/`EXHAUSTED`.
-- [ ] T004 [P] Integration test `tests/integration/dead-letter.repository.integration.spec.ts` (`PostgreSqlContainer`; run the real migrations with `migrationsRun: true` and `synchronize: false`, so the migration and backfill are exercised):
+- [x] T004 [P] Integration test `tests/integration/dead-letter.repository.integration.spec.ts` (`PostgreSqlContainer`; run the real migrations with `migrationsRun: true` and `synchronize: false`, so the migration and backfill are exercised):
   - **backfill**: insert rows before running the new migration. Use a DataSource that runs migrations one at a time (`dataSource.runMigrations({ transaction: 'each' })`) after inserting rows between the base and the new migration, or insert via SQL into the pre-US-08 schema and then run the US-08 migration. Then: an outbound row is `PENDING_RETRY` with `nextRetryAt ≤ now`; a `MALFORMED` inbound row is `EXHAUSTED`; a `RETRIES_EXHAUSTED` inbound row is `PENDING_RETRY`;
   - **claim**: `processNextDue` returns `false` when nothing is due; picks only `PENDING_RETRY` rows with `nextRetryAt ≤ now`, oldest `nextRetryAt` first; applies the handler's `RetryUpdate` (verify the columns); a handler that throws leaves the row unchanged (rollback) and still due.
 
@@ -72,15 +73,16 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
 
 ### Implementation
 
-- [ ] T005 [P] Create `DeadLetterStatus` (`PENDING_RETRY`, `RESOLVED`, `EXHAUSTED`) in `src/infra/database/entities/dead-letter-status.enum.ts`, with JSDoc for each state.
-- [ ] T006 Add to `src/infra/database/entities/order-dead-letter.entity.ts` and `src/infra/database/entities/consumed-message-dead-letter.entity.ts`:
+- [x] T005 [P] Create `DeadLetterStatus` (`PENDING_RETRY`, `RESOLVED`, `EXHAUSTED`) in `src/infra/database/entities/dead-letter-status.enum.ts`, with JSDoc for each state.
+- [x] T006 Add to `src/infra/database/entities/order-dead-letter.entity.ts` and `src/infra/database/entities/consumed-message-dead-letter.entity.ts`:
   - `status` (`enum DeadLetterStatus`, `enumName: 'dead_letter_status_enum'`, default `PENDING_RETRY`);
   - `nextRetryAt` (timestamptz, default `() => 'now()'`);
   - `lastAttemptAt`, `lastError` and `resolvedAt` (nullable);
   - on the consumed table, also `retryCount` (int, default 0).
 
   JSDoc each column, and state that `attempts` counts in-consumer attempts while `retryCount` counts worker attempts.
-- [ ] T007 Create the migration `src/infra/database/migrations/20261112120000-AddDeadLetterRetryBookkeeping.ts` (class `AddDeadLetterRetryBookkeeping20261112120000`), per data-model.md:
+
+- [x] T007 Create the migration `src/infra/database/migrations/20261112120000-AddDeadLetterRetryBookkeeping.ts` (class `AddDeadLetterRetryBookkeeping20261112120000`), per data-model.md:
   - create the enum;
   - add the columns to both tables (plus `retryCount` on consumed);
   - `UPDATE consumed_message_dead_letters SET status='EXHAUSTED' WHERE "failureType"='MALFORMED'`;
@@ -88,8 +90,9 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
   - a full `down()`.
 
   Run `npm run migration:run` and `npm run migration:revert` and `npm run migration:run` against ecommerce-infra.
-- [ ] T008 Create `src/infra/dead-letter/retry-policy.ts` with `RetrySettings`, `AttemptResult`, `RetryUpdate`, `deadLetterDelay(retryCount, settings)` and `decideRetry(row: { retryCount }, result, now, settings): RetryUpdate`, per research R3. Pure, with JSDoc. Makes T003 pass.
-- [ ] T009 Add `processNextDue(handler: (row) => Promise<RetryUpdate>): Promise<boolean>` to `src/repositories/order-dead-letter.repository.ts` and `src/repositories/consumed-message-dead-letter.repository.ts`. Use `DataSource.transaction`:
+
+- [x] T008 Create `src/infra/dead-letter/retry-policy.ts` with `RetrySettings`, `AttemptResult`, `RetryUpdate`, `deadLetterDelay(retryCount, settings)` and `decideRetry(row: { retryCount }, result, now, settings): RetryUpdate`, per research R3. Pure, with JSDoc. Makes T003 pass.
+- [x] T009 Add `processNextDue(handler: (row) => Promise<RetryUpdate>): Promise<boolean>` to `src/repositories/order-dead-letter.repository.ts` and `src/repositories/consumed-message-dead-letter.repository.ts`. Use `DataSource.transaction`:
   - query `SELECT * FROM <table> WHERE status = $1 AND "nextRetryAt" <= now() ORDER BY "nextRetryAt", "createdAt" LIMIT 1 FOR UPDATE SKIP LOCKED` through the query builder with `.setLock('pessimistic_write').setOnLocked('skip_locked')`, or a raw query;
   - return `false` when there is no row;
   - otherwise `await handler(row)` and apply the update with `manager.update(Entity, { id }, update)`.
@@ -160,6 +163,7 @@ npm run format:check && npm run test`. **Commit only when the gate exits 0**: ch
   - a handler error propagates.
 
   The existing `handleMessage` tests must stay green unchanged.
+
 - [ ] T016 [P] [US2] Extend `tests/unit/infra/dead-letter-retry.worker.spec.ts`:
   - a `payments.*` row calls `paymentConsumer.process(row.topic, Buffer.from(row.rawValue))` and an `orders.*` row calls `projectionConsumer.process`;
   - success → `RESOLVED`; `MalformedMessageError` → `EXHAUSTED` (permanent); another error → transient;
