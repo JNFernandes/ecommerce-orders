@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { Kafka, Producer } from 'kafkajs';
 import { KafkaConfig } from '../../config/configuration';
 import { KAFKA_CLIENT, KAFKA_PRODUCER } from './kafka.constants';
+import { createKafkaLogCreator } from './kafka-log-creator';
+
+/** Shared by both clients, so a broker outage is throttled once, not per client. */
+const kafkaLogCreator = createKafkaLogCreator();
 
 /**
  * Kafka client and producer wiring. Nothing here connects: the producer connects lazily on its
@@ -14,6 +18,9 @@ import { KAFKA_CLIENT, KAFKA_PRODUCER } from './kafka.constants';
  * how long a publish to an unreachable broker takes (about 3 s with the defaults). The consumers'
  * client (`KAFKA_CLIENT`) keeps kafkajs's default retries: lowering them made consumers give up
  * on routine startup errors such as "group coordinator not available".
+ *
+ * Both clients log through the Nest logger (`createKafkaLogCreator`), which throttles kafkajs's
+ * per-retry connection-failure lines during an outage.
  */
 @Global()
 @Module({
@@ -26,6 +33,7 @@ import { KAFKA_CLIENT, KAFKA_PRODUCER } from './kafka.constants';
           clientId: config.clientId,
           brokers: config.brokers,
           connectionTimeout: config.connectionTimeoutMs,
+          logCreator: kafkaLogCreator,
         });
       },
       inject: [ConfigService],
@@ -40,6 +48,7 @@ import { KAFKA_CLIENT, KAFKA_PRODUCER } from './kafka.constants';
           brokers: config.brokers,
           connectionTimeout: config.connectionTimeoutMs,
           retry,
+          logCreator: kafkaLogCreator,
         }).producer({ retry });
       },
       inject: [ConfigService],
