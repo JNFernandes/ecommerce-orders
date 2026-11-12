@@ -32,6 +32,17 @@ export interface KafkaConfig {
   backoffInitialMs: number;
   /** Maximum retry delay in ms, for both consumers (`PAYMENT_CONSUMER_BACKOFF_MAX_MS`, default 30000). */
   backoffMaxMs: number;
+  /**
+   * Timeout in ms for opening a broker connection (`KAFKA_CONNECTION_TIMEOUT_MS`, default 1000).
+   * With `producerRetries`, it bounds how long a publish to an unreachable broker can take.
+   */
+  connectionTimeoutMs: number;
+  /**
+   * Retries for connecting and publishing before the producer gives up and the event is
+   * dead-lettered (`KAFKA_PRODUCER_RETRIES`, default 1). Consumers keep kafkajs's default of 5
+   * for processing, and reconnect on their own loop.
+   */
+  producerRetries: number;
 }
 
 export interface ReadModelConfig {
@@ -89,6 +100,8 @@ export default (): AppConfig => ({
     maxAttempts: parseInt(process.env.PAYMENT_CONSUMER_MAX_ATTEMPTS ?? '5', 10),
     backoffInitialMs: parseInt(process.env.PAYMENT_CONSUMER_BACKOFF_INITIAL_MS ?? '1000', 10),
     backoffMaxMs: parseInt(process.env.PAYMENT_CONSUMER_BACKOFF_MAX_MS ?? '30000', 10),
+    connectionTimeoutMs: parseInt(process.env.KAFKA_CONNECTION_TIMEOUT_MS ?? '1000', 10),
+    producerRetries: parseInt(process.env.KAFKA_PRODUCER_RETRIES ?? '1', 10),
   },
   readModel: {
     mongoUri: process.env.MONGO_URI ?? 'mongodb://localhost:27017/orders_read',

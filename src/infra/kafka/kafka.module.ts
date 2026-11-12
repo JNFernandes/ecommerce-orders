@@ -1,39 +1,50 @@
-import { Global, Inject, Module, OnModuleDestroy } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Kafka, Producer } from 'kafkajs';
 import { KafkaConfig } from '../../config/configuration';
 import { KAFKA_CLIENT, KAFKA_PRODUCER } from './kafka.constants';
 
+/**
+ * Kafka client and producer wiring. Nothing here connects: the producer connects lazily on its
+ * first publish (OrderEventsProducer, which also disconnects it on shutdown) and the consumers
+ * connect in the background, so the service starts even when Kafka is down.
+ *
+ * The producer gets **its own client** with `retry.retries = KAFKA_PRODUCER_RETRIES`. kafkajs
+ * uses the client-level retry for broker connections, so this, with `connectionTimeout`, bounds
+ * how long a publish to an unreachable broker takes (about 3 s with the defaults). The consumers'
+ * client (`KAFKA_CLIENT`) keeps kafkajs's default retries: lowering them made consumers give up
+ * on routine startup errors such as "group coordinator not available".
+ */
 @Global()
 @Module({
   providers: [
     {
       provide: KAFKA_CLIENT,
       useFactory: (configService: ConfigService): Kafka => {
-        const kafkaConfig = configService.get<KafkaConfig>('kafka');
+        const config = configService.getOrThrow<KafkaConfig>('kafka');
         return new Kafka({
-          clientId: kafkaConfig?.clientId ?? 'ecommerce-orders',
-          brokers: kafkaConfig?.brokers ?? ['localhost:9092'],
+          clientId: config.clientId,
+          brokers: config.brokers,
+          connectionTimeout: config.connectionTimeoutMs,
         });
       },
       inject: [ConfigService],
     },
     {
       provide: KAFKA_PRODUCER,
-      useFactory: async (kafka: Kafka): Promise<Producer> => {
-        const producer = kafka.producer();
-        await producer.connect();
-        return producer;
+      useFactory: (configService: ConfigService): Producer => {
+        const config = configService.getOrThrow<KafkaConfig>('kafka');
+        const retry = { retries: config.producerRetries };
+        return new Kafka({
+          clientId: config.clientId,
+          brokers: config.brokers,
+          connectionTimeout: config.connectionTimeoutMs,
+          retry,
+        }).producer({ retry });
       },
-      inject: [KAFKA_CLIENT],
+      inject: [ConfigService],
     },
   ],
   exports: [KAFKA_CLIENT, KAFKA_PRODUCER],
 })
-export class KafkaModule implements OnModuleDestroy {
-  constructor(@Inject(KAFKA_PRODUCER) private readonly producer: Producer) {}
-
-  async onModuleDestroy(): Promise<void> {
-    await this.producer.disconnect();
-  }
-}
+export class KafkaModule {}

@@ -24,6 +24,8 @@ const KAFKA_CONFIG: KafkaConfig = {
   maxAttempts: 3,
   backoffInitialMs: 1,
   backoffMaxMs: 2,
+  connectionTimeoutMs: 1000,
+  producerRetries: 1,
 };
 
 function placedValue(): Buffer {
