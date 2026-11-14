@@ -16,9 +16,9 @@ export class EventAlreadyProcessedError extends Error {
 export class OrderNotFoundForPaymentError extends Error {
   constructor(
     public readonly orderId: string,
-    public readonly paymentId: string,
+    public readonly paymentId?: string,
   ) {
-    super(`no order ${orderId} found for payment ${paymentId}`);
+    super(`no order ${orderId} found for payment ${paymentId ?? 'unknown'}`);
     this.name = 'OrderNotFoundForPaymentError';
   }
 }

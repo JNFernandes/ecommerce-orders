@@ -3,7 +3,7 @@ import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { ReactToPaymentOutcomeCommand } from '../commands/react-to-payment-outcome.command';
 import { ConfirmOrderCommand } from '../commands/confirm-order.command';
 import { CancelOrderCommand } from '../commands/cancel-order.command';
-import { InboundEventRef } from '../commands/inbound-event-ref';
+import { InboundEventRef, describeInboundEvent } from '../commands/inbound-event-ref';
 import { PaymentReaction, decidePaymentReaction } from '../domain/payment-reaction.policy';
 import { ProcessedEventOutcome } from '../infra/database/entities/processed-event.entity';
 import { OrderRepository } from '../repositories/order.repository';
@@ -109,5 +109,5 @@ export class ReactToPaymentOutcomeService implements ICommandHandler<
 }
 
 function describe(ref: InboundEventRef): string {
-  return `orderId=${ref.orderId} paymentId=${ref.paymentId} eventId=${ref.eventId} topic=${ref.topic}`;
+  return describeInboundEvent(ref);
 }

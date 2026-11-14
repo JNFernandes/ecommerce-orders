@@ -110,7 +110,8 @@ export class OrderRepository {
           eventId: inbound.eventId,
           topic: inbound.topic,
           orderId: inbound.orderId,
-          paymentId: inbound.paymentId,
+          paymentId: inbound.paymentId ?? null,
+          reservationId: inbound.reservationId ?? null,
           outcome,
         });
       });

@@ -34,7 +34,8 @@ export class ProcessedEventRepository {
         eventId: ref.eventId,
         topic: ref.topic,
         orderId: ref.orderId,
-        paymentId: ref.paymentId,
+        paymentId: ref.paymentId ?? null,
+        reservationId: ref.reservationId ?? null,
         outcome,
       });
     } catch (error) {
