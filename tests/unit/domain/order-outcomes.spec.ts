@@ -412,3 +412,305 @@ describe('Order outcomes — outcomes for an order that is no longer PENDING', (
     expect(order.stockOutcome).toBe(StockOutcome.PENDING);
   });
 });
+
+interface Step {
+  outcome: OutcomeName;
+  record: OutcomeRecord;
+  attention: Attention;
+  status: OrderStatus;
+  payment: PaymentOutcome;
+  stock: StockOutcome;
+  reason: string | null;
+  /** Event raised by this step, if any. */
+  event: 'OrderConfirmed' | 'OrderCancelled' | null;
+}
+
+const PAY_REASON = 'payment failed: late reason';
+const STOCK_REASON = 'stock rejected: late reason';
+
+const { PENDING, CONFIRMED, CANCELLED } = OrderStatus;
+const P = PaymentOutcome;
+const S = StockOutcome;
+const R = OutcomeRecord;
+const A = Attention;
+
+/**
+ * Every arrival order of one payment outcome and one stock outcome (8 sequences), plus the two
+ * same-side contradictions. Each row describes the state after each of the two steps.
+ */
+const sequences: Array<[string, Step, Step]> = [
+  [
+    'should confirm when stock is reserved after the payment was processed',
+    {
+      outcome: 'paymentProcessed',
+      record: R.RECORDED,
+      attention: A.NONE,
+      status: PENDING,
+      payment: P.PROCESSED,
+      stock: S.PENDING,
+      reason: null,
+      event: null,
+    },
+    {
+      outcome: 'stockReserved',
+      record: R.CONFIRMED,
+      attention: A.NONE,
+      status: CONFIRMED,
+      payment: P.PROCESSED,
+      stock: S.RESERVED,
+      reason: null,
+      event: 'OrderConfirmed',
+    },
+  ],
+  [
+    'should confirm when the payment is processed after stock was reserved',
+    {
+      outcome: 'stockReserved',
+      record: R.RECORDED,
+      attention: A.NONE,
+      status: PENDING,
+      payment: P.PENDING,
+      stock: S.RESERVED,
+      reason: null,
+      event: null,
+    },
+    {
+      outcome: 'paymentProcessed',
+      record: R.CONFIRMED,
+      attention: A.NONE,
+      status: CONFIRMED,
+      payment: P.PROCESSED,
+      stock: S.RESERVED,
+      reason: null,
+      event: 'OrderConfirmed',
+    },
+  ],
+  [
+    'should cancel when stock is rejected after the payment was processed',
+    {
+      outcome: 'paymentProcessed',
+      record: R.RECORDED,
+      attention: A.NONE,
+      status: PENDING,
+      payment: P.PROCESSED,
+      stock: S.PENDING,
+      reason: null,
+      event: null,
+    },
+    {
+      outcome: 'stockRejected',
+      record: R.CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.PROCESSED,
+      stock: S.REJECTED,
+      reason: STOCK_REASON,
+      event: 'OrderCancelled',
+    },
+  ],
+  [
+    'should cancel on stock rejected and flag the later processed payment for a refund',
+    {
+      outcome: 'stockRejected',
+      record: R.CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.PENDING,
+      stock: S.REJECTED,
+      reason: STOCK_REASON,
+      event: 'OrderCancelled',
+    },
+    {
+      outcome: 'paymentProcessed',
+      record: R.IGNORED_CONFLICT,
+      attention: A.REFUND_NEEDED,
+      status: CANCELLED,
+      payment: P.PENDING,
+      stock: S.REJECTED,
+      reason: STOCK_REASON,
+      event: null,
+    },
+  ],
+  [
+    'should cancel on payment failed and ignore the later reserved stock',
+    {
+      outcome: 'paymentFailed',
+      record: R.CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.FAILED,
+      stock: S.PENDING,
+      reason: PAY_REASON,
+      event: 'OrderCancelled',
+    },
+    {
+      outcome: 'stockReserved',
+      record: R.IGNORED_ALREADY_CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.FAILED,
+      stock: S.PENDING,
+      reason: PAY_REASON,
+      event: null,
+    },
+  ],
+  [
+    'should cancel when the payment fails after stock was reserved',
+    {
+      outcome: 'stockReserved',
+      record: R.RECORDED,
+      attention: A.NONE,
+      status: PENDING,
+      payment: P.PENDING,
+      stock: S.RESERVED,
+      reason: null,
+      event: null,
+    },
+    {
+      outcome: 'paymentFailed',
+      record: R.CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.FAILED,
+      stock: S.RESERVED,
+      reason: PAY_REASON,
+      event: 'OrderCancelled',
+    },
+  ],
+  [
+    'should keep the payment reason when stock is rejected after the payment failed (first negative wins)',
+    {
+      outcome: 'paymentFailed',
+      record: R.CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.FAILED,
+      stock: S.PENDING,
+      reason: PAY_REASON,
+      event: 'OrderCancelled',
+    },
+    {
+      outcome: 'stockRejected',
+      record: R.IGNORED_ALREADY_CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.FAILED,
+      stock: S.PENDING,
+      reason: PAY_REASON,
+      event: null,
+    },
+  ],
+  [
+    'should keep the stock reason when the payment fails after stock was rejected (first negative wins)',
+    {
+      outcome: 'stockRejected',
+      record: R.CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.PENDING,
+      stock: S.REJECTED,
+      reason: STOCK_REASON,
+      event: 'OrderCancelled',
+    },
+    {
+      outcome: 'paymentFailed',
+      record: R.IGNORED_ALREADY_CANCELLED,
+      attention: A.NONE,
+      status: CANCELLED,
+      payment: P.PENDING,
+      stock: S.REJECTED,
+      reason: STOCK_REASON,
+      event: null,
+    },
+  ],
+  [
+    'should keep the first payment outcome when a failure follows a processed payment',
+    {
+      outcome: 'paymentProcessed',
+      record: R.RECORDED,
+      attention: A.NONE,
+      status: PENDING,
+      payment: P.PROCESSED,
+      stock: S.PENDING,
+      reason: null,
+      event: null,
+    },
+    {
+      outcome: 'paymentFailed',
+      record: R.IGNORED_CONFLICT,
+      attention: A.CONFLICT,
+      status: PENDING,
+      payment: P.PROCESSED,
+      stock: S.PENDING,
+      reason: null,
+      event: null,
+    },
+  ],
+  [
+    'should keep the first stock outcome when a rejection follows a reserved stock',
+    {
+      outcome: 'stockReserved',
+      record: R.RECORDED,
+      attention: A.NONE,
+      status: PENDING,
+      payment: P.PENDING,
+      stock: S.RESERVED,
+      reason: null,
+      event: null,
+    },
+    {
+      outcome: 'stockRejected',
+      record: R.IGNORED_CONFLICT,
+      attention: A.CONFLICT,
+      status: PENDING,
+      payment: P.PENDING,
+      stock: S.RESERVED,
+      reason: null,
+      event: null,
+    },
+  ],
+];
+
+describe('Order outcomes — every arrival order', () => {
+  it.each(sequences)('%s', (_name, first, second) => {
+    const order = placedOrder();
+
+    for (const step of [first, second]) {
+      const result = apply(order, step.outcome);
+
+      expect(result).toEqual({ record: step.record, attention: step.attention });
+      expect(order.status).toBe(step.status);
+      expect(order.paymentOutcome).toBe(step.payment);
+      expect(order.stockOutcome).toBe(step.stock);
+      expect(order.cancellationReason).toBe(step.reason);
+
+      const events = order.pullDomainEvents();
+      if (step.event === null) {
+        expect(events).toEqual([]);
+      } else {
+        expect(events).toHaveLength(1);
+        expect(events[0]).toBeInstanceOf(
+          step.event === 'OrderConfirmed' ? OrderConfirmed : OrderCancelled,
+        );
+      }
+    }
+  });
+
+  it('should confirm exactly once even when both positive outcomes are repeated', () => {
+    const order = placedOrder();
+    const raised = [
+      order.recordPaymentProcessed(),
+      order.recordStockReserved(),
+      order.recordPaymentProcessed(),
+      order.recordStockReserved(),
+    ].map((result) => result.record);
+
+    expect(raised).toEqual([
+      R.RECORDED,
+      R.CONFIRMED,
+      R.IGNORED_ALREADY_CONFIRMED,
+      R.IGNORED_ALREADY_CONFIRMED,
+    ]);
+    expect(order.pullDomainEvents()).toHaveLength(1);
+  });
+});
