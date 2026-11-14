@@ -116,6 +116,9 @@ export class Order {
    * @param reason The failure reason announced by Payments; may be empty.
    */
   recordPaymentFailed(reason?: string): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: false, paymentProcessed: false });
+    }
     if (this.paymentOutcome === PaymentOutcome.PROCESSED) {
       return { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
     }
@@ -135,6 +138,9 @@ export class Order {
    * @param reason The rejection reason announced by Inventory; may be empty.
    */
   recordStockRejected(reason?: string): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: false, paymentProcessed: false });
+    }
     if (this.stockOutcome === StockOutcome.RESERVED) {
       return { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
     }
@@ -142,6 +148,26 @@ export class Order {
     this.stockOutcome = StockOutcome.REJECTED;
     this.markCancelled(Order.cancellationReasonFor('stock rejected', reason));
     return { record: OutcomeRecord.CANCELLED, attention: Attention.NONE };
+  }
+
+  /**
+   * Classifies an outcome that arrives after the order reached a final status. Nothing changes.
+   * On a CONFIRMED order, a positive outcome agrees with it and a negative one is a conflict.
+   * On a CANCELLED order, a processed payment means the customer was charged for an order that
+   * will not ship (refund needed); every other outcome needs no action.
+   */
+  private ignoreForFinalStatus(outcome: {
+    positive: boolean;
+    paymentProcessed: boolean;
+  }): OutcomeApplication {
+    if (this.status === OrderStatus.CONFIRMED) {
+      return outcome.positive
+        ? { record: OutcomeRecord.IGNORED_ALREADY_CONFIRMED, attention: Attention.NONE }
+        : { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
+    }
+    return outcome.paymentProcessed
+      ? { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.REFUND_NEEDED }
+      : { record: OutcomeRecord.IGNORED_ALREADY_CANCELLED, attention: Attention.NONE };
   }
 
   /** `<prefix>: <reason>`, or the bare prefix when the trimmed reason is empty or missing. */
@@ -179,6 +205,9 @@ export class Order {
    * records the outcome and waits for the stock. Never throws.
    */
   recordPaymentProcessed(): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: true, paymentProcessed: true });
+    }
     if (this.paymentOutcome === PaymentOutcome.PROCESSED) {
       return { record: OutcomeRecord.IGNORED_DUPLICATE, attention: Attention.NONE };
     }
@@ -193,6 +222,9 @@ export class Order {
    * records the outcome and waits for the payment. Never throws.
    */
   recordStockReserved(): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: true, paymentProcessed: false });
+    }
     if (this.stockOutcome === StockOutcome.RESERVED) {
       return { record: OutcomeRecord.IGNORED_DUPLICATE, attention: Attention.NONE };
     }

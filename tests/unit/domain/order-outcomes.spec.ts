@@ -276,3 +276,139 @@ describe('Order outcomes — negative outcomes on a PENDING order', () => {
     expect(order.pullDomainEvents()).toEqual([]);
   });
 });
+
+type OutcomeName = 'paymentProcessed' | 'paymentFailed' | 'stockReserved' | 'stockRejected';
+
+/** Applies the named outcome through the matching Order method. */
+function apply(order: Order, outcome: OutcomeName): ReturnType<Order['recordPaymentProcessed']> {
+  switch (outcome) {
+    case 'paymentProcessed':
+      return order.recordPaymentProcessed();
+    case 'paymentFailed':
+      return order.recordPaymentFailed('late reason');
+    case 'stockReserved':
+      return order.recordStockReserved();
+    case 'stockRejected':
+      return order.recordStockRejected('late reason');
+  }
+}
+
+describe('Order outcomes — outcomes for an order that is no longer PENDING', () => {
+  const confirmed = (): Order =>
+    storedOrder(OrderStatus.CONFIRMED, PaymentOutcome.PROCESSED, StockOutcome.RESERVED);
+  const cancelled = (): Order =>
+    storedOrder(
+      OrderStatus.CANCELLED,
+      PaymentOutcome.FAILED,
+      StockOutcome.PENDING,
+      'payment failed: card declined',
+    );
+
+  it.each<[string, () => Order, OutcomeName, OutcomeRecord, Attention]>([
+    [
+      'CONFIRMED',
+      confirmed,
+      'paymentProcessed',
+      OutcomeRecord.IGNORED_ALREADY_CONFIRMED,
+      Attention.NONE,
+    ],
+    [
+      'CONFIRMED',
+      confirmed,
+      'stockReserved',
+      OutcomeRecord.IGNORED_ALREADY_CONFIRMED,
+      Attention.NONE,
+    ],
+    ['CONFIRMED', confirmed, 'paymentFailed', OutcomeRecord.IGNORED_CONFLICT, Attention.CONFLICT],
+    ['CONFIRMED', confirmed, 'stockRejected', OutcomeRecord.IGNORED_CONFLICT, Attention.CONFLICT],
+    [
+      'CANCELLED',
+      cancelled,
+      'paymentProcessed',
+      OutcomeRecord.IGNORED_CONFLICT,
+      Attention.REFUND_NEEDED,
+    ],
+    [
+      'CANCELLED',
+      cancelled,
+      'paymentFailed',
+      OutcomeRecord.IGNORED_ALREADY_CANCELLED,
+      Attention.NONE,
+    ],
+    [
+      'CANCELLED',
+      cancelled,
+      'stockReserved',
+      OutcomeRecord.IGNORED_ALREADY_CANCELLED,
+      Attention.NONE,
+    ],
+    [
+      'CANCELLED',
+      cancelled,
+      'stockRejected',
+      OutcomeRecord.IGNORED_ALREADY_CANCELLED,
+      Attention.NONE,
+    ],
+  ])(
+    'should leave a %s order unchanged when %s arrives',
+    (_status, build, outcome, expectedRecord, expectedAttention) => {
+      const order = build();
+      const before = {
+        status: order.status,
+        paymentOutcome: order.paymentOutcome,
+        stockOutcome: order.stockOutcome,
+        cancellationReason: order.cancellationReason,
+        updatedAt: order.updatedAt,
+      };
+
+      const result = apply(order, outcome);
+
+      expect(result).toEqual({ record: expectedRecord, attention: expectedAttention });
+      expect({
+        status: order.status,
+        paymentOutcome: order.paymentOutcome,
+        stockOutcome: order.stockOutcome,
+        cancellationReason: order.cancellationReason,
+        updatedAt: order.updatedAt,
+      }).toEqual(before);
+      expect(order.pullDomainEvents()).toEqual([]);
+    },
+  );
+
+  it('should flag a processed payment for an order cancelled by a stock rejection as needing a refund', () => {
+    const order = storedOrder(
+      OrderStatus.CANCELLED,
+      PaymentOutcome.PENDING,
+      StockOutcome.REJECTED,
+      'stock rejected: insufficient stock',
+    );
+
+    const result = order.recordPaymentProcessed();
+
+    expect(result).toEqual({
+      record: OutcomeRecord.IGNORED_CONFLICT,
+      attention: Attention.REFUND_NEEDED,
+    });
+    expect(order.paymentOutcome).toBe(PaymentOutcome.PENDING);
+    expect(order.pullDomainEvents()).toEqual([]);
+  });
+
+  it('should ignore outcomes for an order cancelled through REST without touching its outcomes', () => {
+    const order = storedOrder(OrderStatus.CANCELLED, PaymentOutcome.PENDING, StockOutcome.PENDING);
+
+    expect(order.recordStockReserved().record).toBe(OutcomeRecord.IGNORED_ALREADY_CANCELLED);
+    expect(order.stockOutcome).toBe(StockOutcome.PENDING);
+    expect(order.cancellationReason).toBeNull();
+  });
+
+  it('should ignore a stock outcome for an order confirmed manually before any outcome arrived', () => {
+    const order = storedOrder(OrderStatus.CONFIRMED, PaymentOutcome.PENDING, StockOutcome.PENDING);
+
+    expect(order.recordStockRejected('insufficient stock')).toEqual({
+      record: OutcomeRecord.IGNORED_CONFLICT,
+      attention: Attention.CONFLICT,
+    });
+    expect(order.status).toBe(OrderStatus.CONFIRMED);
+    expect(order.stockOutcome).toBe(StockOutcome.PENDING);
+  });
+});
