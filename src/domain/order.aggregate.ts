@@ -7,6 +7,8 @@ import { OrderConfirmed } from './events/order-confirmed.event';
 import { OrderValidationError } from './order-validation.error';
 import { OrderCancellationError } from './order-cancellation.error';
 import { OrderConfirmationError } from './order-confirmation.error';
+import { PaymentOutcome } from './payment-outcome.enum';
+import { StockOutcome } from './stock-outcome.enum';
 
 export interface RawOrderItem {
   productId: string;
@@ -32,8 +34,15 @@ export class Order {
     public readonly totalAmount: number,
     public readonly createdAt: Date,
     public updatedAt: Date,
-    /** Why the order was cancelled, when a reason was given (payment failure); otherwise null. */
+    /**
+     * Why the order was cancelled, when a reason was given (payment failure or stock
+     * rejection); otherwise null.
+     */
     public cancellationReason: string | null = null,
+    /** The payment outcome received so far (`PENDING` until Payments announces one). */
+    public paymentOutcome: PaymentOutcome = PaymentOutcome.PENDING,
+    /** The stock outcome received so far (`PENDING` until Inventory announces one). */
+    public stockOutcome: StockOutcome = StockOutcome.PENDING,
   ) {}
 
   /**
@@ -116,7 +125,10 @@ export class Order {
     this.domainEvents.push(OrderConfirmed.from(this));
   }
 
-  /** Reconstructs an Order from persisted state, without raising domain events. */
+  /**
+   * Reconstructs an Order from persisted state, without raising domain events. The outcomes
+   * default to `PENDING` when not given.
+   */
   static reconstitute(
     id: string,
     customerId: string,
@@ -126,6 +138,8 @@ export class Order {
     createdAt: Date,
     updatedAt: Date,
     cancellationReason: string | null = null,
+    paymentOutcome: PaymentOutcome = PaymentOutcome.PENDING,
+    stockOutcome: StockOutcome = StockOutcome.PENDING,
   ): Order {
     return new Order(
       id,
@@ -136,6 +150,8 @@ export class Order {
       createdAt,
       updatedAt,
       cancellationReason,
+      paymentOutcome,
+      stockOutcome,
     );
   }
 
