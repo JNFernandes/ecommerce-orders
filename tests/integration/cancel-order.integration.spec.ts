@@ -144,4 +144,25 @@ describe('POST /orders/:orderId/cancel (integration)', () => {
 
     expect(response.status).toBe(409);
   });
+
+  it('should cancel a PENDING order through REST whatever its outcomes, and leave the outcomes unchanged', async () => {
+    const orderId = await placeOrder();
+    await dataSource.query(
+      `UPDATE orders SET "paymentOutcome" = 'PROCESSED', "stockOutcome" = 'PENDING' WHERE id = $1`,
+      [orderId],
+    );
+
+    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/cancel`);
+
+    expect(response.status).toBe(200);
+    const rows = await dataSource.query(
+      'SELECT status, "paymentOutcome", "stockOutcome" FROM orders WHERE id = $1',
+      [orderId],
+    );
+    expect(rows[0]).toEqual({
+      status: 'CANCELLED',
+      paymentOutcome: 'PROCESSED',
+      stockOutcome: 'PENDING',
+    });
+  });
 });

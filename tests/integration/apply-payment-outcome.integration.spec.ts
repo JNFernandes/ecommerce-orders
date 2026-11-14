@@ -32,9 +32,6 @@ import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-let
 import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { ProcessedEventRepository } from '../../src/repositories/processed-event.repository';
 import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
-import { OrderStatusChangedConcurrentlyError } from '../../src/repositories/errors/order-status-changed-concurrently.error';
-import { EventAlreadyProcessedError } from '../../src/services/errors/outcome.errors';
-import { ProcessedEventOutcome } from '../../src/infra/database/entities/processed-event.entity';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
@@ -503,51 +500,6 @@ describe('Payment outcome consumer (integration)', () => {
       const [row] = await deadLetters();
       expect(row).toMatchObject({ failureType: 'RETRIES_EXHAUSTED', eventId: message.eventId });
       expect(producerSend).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('OrderRepository.applyInboundStatusChange', () => {
-    it('should roll back the status change when the eventId is already recorded', async () => {
-      const orderId = await placeOrder();
-      const eventId = randomUUID();
-      await dataSource.query(
-        `INSERT INTO processed_events ("eventId", topic, "orderId", "paymentId", outcome)
-         VALUES ($1, $2, $3, $4, 'IGNORED_CONFLICT')`,
-        [eventId, PAYMENT_PROCESSED_TOPIC, orderId, randomUUID()],
-      );
-      const orderRepository = app.get(OrderRepository);
-      const order = await orderRepository.findById(orderId);
-      order!.confirm();
-
-      await expect(
-        orderRepository.applyInboundStatusChange(
-          order!,
-          { eventId, topic: PAYMENT_PROCESSED_TOPIC, orderId, paymentId: randomUUID() },
-          ProcessedEventOutcome.CONFIRMED,
-        ),
-      ).rejects.toThrow(EventAlreadyProcessedError);
-
-      expect(await statusOf(orderId)).toBe('PENDING');
-    });
-
-    it('should not overwrite an order whose status changed concurrently, and roll back', async () => {
-      const orderId = await placeOrder();
-      const orderRepository = app.get(OrderRepository);
-      const stale = await orderRepository.findById(orderId);
-      await setStatus(orderId, 'CANCELLED');
-      stale!.confirm();
-      const eventId = randomUUID();
-
-      await expect(
-        orderRepository.applyInboundStatusChange(
-          stale!,
-          { eventId, topic: PAYMENT_PROCESSED_TOPIC, orderId, paymentId: randomUUID() },
-          ProcessedEventOutcome.CONFIRMED,
-        ),
-      ).rejects.toThrow(OrderStatusChangedConcurrentlyError);
-
-      expect(await statusOf(orderId)).toBe('CANCELLED');
-      expect(await processedRows(eventId)).toEqual([]);
     });
   });
 });

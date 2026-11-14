@@ -6,7 +6,6 @@ import { OrderRepository } from '../repositories/order.repository';
 import { OrderDeadLetterRepository } from '../repositories/order-dead-letter.repository';
 import { ORDER_CANCELLED_TOPIC, OrderEventsProducer } from '../infra/kafka/order-events.producer';
 import { CancelOrderCommand } from '../commands/cancel-order.command';
-import { ProcessedEventOutcome } from '../infra/database/entities/processed-event.entity';
 
 export interface CancelOrderResult {
   orderId: string;
@@ -36,18 +35,10 @@ export class CancelOrderService implements ICommandHandler<CancelOrderCommand, C
       throw new NotFoundException('Order not found');
     }
 
-    order.cancel(command.reason);
+    order.cancel();
     const [orderCancelledEvent] = order.pullDomainEvents() as [OrderCancelled];
 
-    if (command.inboundEvent) {
-      await this.orderRepository.applyInboundStatusChange(
-        order,
-        command.inboundEvent,
-        ProcessedEventOutcome.CANCELLED,
-      );
-    } else {
-      await this.orderRepository.updateStatus(order.id, order.status, order.updatedAt);
-    }
+    await this.orderRepository.updateStatus(order.id, order.status, order.updatedAt);
 
     try {
       await this.orderEventsProducer.publishOrderCancelled(orderCancelledEvent);
