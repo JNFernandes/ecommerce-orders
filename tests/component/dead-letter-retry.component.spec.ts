@@ -38,7 +38,8 @@ import { ProcessedEventRepository } from '../../src/repositories/processed-event
 import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
-import { ReactToPaymentOutcomeService } from '../../src/services/react-to-payment-outcome.service';
+import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
+import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.consumer';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
@@ -149,7 +150,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
         PlaceOrderService,
         ConfirmOrderService,
         CancelOrderService,
-        ReactToPaymentOutcomeService,
+        OutcomeWriteFlow,
+        ApplyPaymentOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
@@ -271,6 +273,10 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
 
   it('should re-handle a dead-lettered payment message, and resolve its duplicate without a second confirmation', async () => {
     const orderId = await placeOrder();
+    // Stands in for Inventory: the stock is already reserved, so the payment confirms (US-09).
+    await dataSource.query(`UPDATE orders SET "stockOutcome" = 'RESERVED' WHERE id = $1`, [
+      orderId,
+    ]);
     const eventId = randomUUID();
 
     const first = await deadLetterPayment(orderId, eventId);

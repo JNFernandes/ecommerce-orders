@@ -38,7 +38,8 @@ import { ProcessedEventOutcome } from '../../src/infra/database/entities/process
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
-import { ReactToPaymentOutcomeService } from '../../src/services/react-to-payment-outcome.service';
+import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
+import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
 
 jest.setTimeout(180_000);
@@ -105,7 +106,8 @@ describe('Payment outcome consumer (integration)', () => {
         PlaceOrderService,
         ConfirmOrderService,
         CancelOrderService,
-        ReactToPaymentOutcomeService,
+        OutcomeWriteFlow,
+        ApplyPaymentOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
@@ -162,6 +164,23 @@ describe('Payment outcome consumer (integration)', () => {
 
   async function setStatus(orderId: string, status: string): Promise<void> {
     await dataSource.query('UPDATE orders SET status = $2 WHERE id = $1', [orderId, status]);
+  }
+
+  async function setStockOutcome(orderId: string, stockOutcome: string): Promise<void> {
+    await dataSource.query('UPDATE orders SET "stockOutcome" = $2 WHERE id = $1', [
+      orderId,
+      stockOutcome,
+    ]);
+  }
+
+  async function outcomesOf(
+    orderId: string,
+  ): Promise<{ paymentOutcome: string; stockOutcome: string }> {
+    const rows = await dataSource.query(
+      'SELECT "paymentOutcome", "stockOutcome" FROM orders WHERE id = $1',
+      [orderId],
+    );
+    return rows[0];
   }
 
   async function statusOf(orderId: string): Promise<string> {
@@ -231,8 +250,32 @@ describe('Payment outcome consumer (integration)', () => {
   }
 
   describe('payments.payment-processed', () => {
-    it('should confirm a PENDING order, record CONFIRMED, publish once and commit', async () => {
+    it('should record the payment but keep the order PENDING while the stock is pending, publish nothing and commit', async () => {
       const orderId = await placeOrder();
+      const message = processedMessage(orderId);
+      const payload = payloadFor(PAYMENT_PROCESSED_TOPIC, message);
+
+      await consumer.handleMessage(payload);
+
+      expect(await statusOf(orderId)).toBe('PENDING');
+      expect(await outcomesOf(orderId)).toEqual({
+        paymentOutcome: 'PROCESSED',
+        stockOutcome: 'PENDING',
+      });
+      expect(await processedRows(message.eventId as string)).toEqual([{ outcome: 'RECORDED' }]);
+      expect(producerSend).not.toHaveBeenCalled();
+      expect(commitOffsets).toHaveBeenCalledWith([
+        {
+          topic: PAYMENT_PROCESSED_TOPIC,
+          partition: 0,
+          offset: String(Number(payload.message.offset) + 1),
+        },
+      ]);
+    });
+
+    it('should confirm a PENDING order whose stock is already reserved, record CONFIRMED, publish once and commit', async () => {
+      const orderId = await placeOrder();
+      await setStockOutcome(orderId, 'RESERVED');
       const message = processedMessage(orderId);
       const payload = payloadFor(PAYMENT_PROCESSED_TOPIC, message);
 
@@ -288,11 +331,13 @@ describe('Payment outcome consumer (integration)', () => {
       await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, message));
 
       expect(await statusOf(orderId)).toBe('CANCELLED');
-      expect(await cancellationReasonOf(orderId)).toBe('Amount exceeds threshold');
+      expect(await cancellationReasonOf(orderId)).toBe('payment failed: Amount exceeds threshold');
       expect(await processedRows(message.eventId as string)).toEqual([{ outcome: 'CANCELLED' }]);
       expect(sentTopics()).toEqual([ORDER_CANCELLED_TOPIC]);
       const sent = producerSend.mock.calls[0][0] as { messages: Array<{ value: string }> };
-      expect(JSON.parse(sent.messages[0].value).reason).toBe('Amount exceeds threshold');
+      expect(JSON.parse(sent.messages[0].value).reason).toBe(
+        'payment failed: Amount exceeds threshold',
+      );
       expect(commitOffsets).toHaveBeenCalledTimes(1);
     });
 
@@ -325,19 +370,48 @@ describe('Payment outcome consumer (integration)', () => {
       expect(producerSend).not.toHaveBeenCalled();
     });
 
-    it('should store an empty reason when the failed payment has reason null', async () => {
+    it('should store the bare "payment failed" reason when the failed payment has reason null', async () => {
       const orderId = await placeOrder();
 
       await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, failedMessage(orderId, null)));
 
       expect(await statusOf(orderId)).toBe('CANCELLED');
-      expect(await cancellationReasonOf(orderId)).toBe('');
+      expect(await cancellationReasonOf(orderId)).toBe('payment failed');
+    });
+
+    it('should cancel a PENDING order whose stock is already reserved', async () => {
+      const orderId = await placeOrder();
+      await setStockOutcome(orderId, 'RESERVED');
+
+      await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, failedMessage(orderId)));
+
+      expect(await statusOf(orderId)).toBe('CANCELLED');
+      expect(sentTopics()).toEqual([ORDER_CANCELLED_TOPIC]);
+    });
+
+    it('should ignore a failure after a processed payment as IGNORED_CONFLICT (first payment outcome wins)', async () => {
+      const orderId = await placeOrder();
+      await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, processedMessage(orderId)));
+      const failure = failedMessage(orderId);
+
+      await consumer.handleMessage(payloadFor(PAYMENT_FAILED_TOPIC, failure));
+
+      expect(await statusOf(orderId)).toBe('PENDING');
+      expect(await outcomesOf(orderId)).toEqual({
+        paymentOutcome: 'PROCESSED',
+        stockOutcome: 'PENDING',
+      });
+      expect(await processedRows(failure.eventId as string)).toEqual([
+        { outcome: 'IGNORED_CONFLICT' },
+      ]);
+      expect(producerSend).not.toHaveBeenCalled();
     });
   });
 
   describe('duplicate delivery', () => {
     it('should change the order and publish only once when the same message is delivered twice', async () => {
       const orderId = await placeOrder();
+      await setStockOutcome(orderId, 'RESERVED');
       const message = processedMessage(orderId);
 
       await consumer.handleMessage(payloadFor(PAYMENT_PROCESSED_TOPIC, message));

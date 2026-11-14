@@ -39,7 +39,8 @@ import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/cons
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
-import { ReactToPaymentOutcomeService } from '../../src/services/react-to-payment-outcome.service';
+import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
+import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.consumer';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
@@ -208,7 +209,8 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
         PlaceOrderService,
         ConfirmOrderService,
         CancelOrderService,
-        ReactToPaymentOutcomeService,
+        OutcomeWriteFlow,
+        ApplyPaymentOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
@@ -296,6 +298,10 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
     });
 
     // 3. The payment consumer, started while Kafka was down, has reconnected and consumes.
+    // Stands in for Inventory: the stock is already reserved, so the payment confirms (US-09).
+    await dataSource.query(`UPDATE orders SET "stockOutcome" = 'RESERVED' WHERE id = $1`, [
+      orderId,
+    ]);
     paymentsProducer = directKafka.producer();
     await paymentsProducer.connect();
     await paymentsProducer.send({

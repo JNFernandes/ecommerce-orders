@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
 import { PaymentEventsConsumer } from '../../../src/infra/kafka/payment-events.consumer';
 import { PAYMENT_PROCESSED_TOPIC } from '../../../src/infra/kafka/payment-message.parser';
-import { ReactToPaymentOutcomeCommand } from '../../../src/commands/react-to-payment-outcome.command';
+import { ApplyPaymentOutcomeCommand } from '../../../src/commands/apply-payment-outcome.command';
 import { PaymentOutcome } from '../../../src/domain/payment-outcome.enum';
 import { KafkaConfig } from '../../../src/config/configuration';
 import { ConsumedMessageDeadLetterRepository } from '../../../src/repositories/consumed-message-dead-letter.repository';
@@ -102,7 +102,7 @@ describe('PaymentEventsConsumer.handleMessage', () => {
   });
 
   describe('valid messages', () => {
-    it('should dispatch ReactToPaymentOutcomeCommand and then commit offset + 1', async () => {
+    it('should dispatch ApplyPaymentOutcomeCommand and then commit offset + 1', async () => {
       const callOrder: string[] = [];
       const dispatch = jest.fn().mockImplementation(async () => {
         callOrder.push('dispatch');
@@ -115,7 +115,7 @@ describe('PaymentEventsConsumer.handleMessage', () => {
       await consumer.handleMessage(payloadFor(processedValue()));
 
       expect(dispatch).toHaveBeenCalledWith(
-        new ReactToPaymentOutcomeCommand(PaymentOutcome.PROCESSED, {
+        new ApplyPaymentOutcomeCommand(PaymentOutcome.PROCESSED, {
           eventId: EVENT_ID,
           topic: PAYMENT_PROCESSED_TOPIC,
           orderId: ORDER_ID,
@@ -132,7 +132,7 @@ describe('PaymentEventsConsumer.handleMessage', () => {
 
       await consumer.handleMessage(payloadFor(processedValue()));
 
-      const command = dispatch.mock.calls[0][0] as ReactToPaymentOutcomeCommand;
+      const command = dispatch.mock.calls[0][0] as ApplyPaymentOutcomeCommand;
       expect(command.inboundEvent.orderId).toBe(ORDER_ID);
       expect(command.inboundEvent.paymentId).toBe(PAYMENT_ID);
     });
@@ -262,7 +262,7 @@ describe('PaymentEventsConsumer.process (dead-letter retry entry point)', () => 
     await consumer.process(PAYMENT_PROCESSED_TOPIC, processedValue());
 
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch.mock.calls[0][0]).toBeInstanceOf(ReactToPaymentOutcomeCommand);
+    expect(dispatch.mock.calls[0][0]).toBeInstanceOf(ApplyPaymentOutcomeCommand);
     expect(kafkaConsumer.commitOffsets).not.toHaveBeenCalled();
     expect(deadLetters.recordMalformed).not.toHaveBeenCalled();
     expect(deadLetters.recordRetriesExhausted).not.toHaveBeenCalled();

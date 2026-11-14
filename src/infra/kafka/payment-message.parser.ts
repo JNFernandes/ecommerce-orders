@@ -22,7 +22,7 @@ export class MalformedPaymentMessageError extends MalformedMessageError {
 
 /** A validated payment message, reduced to what the Orders service acts on. */
 export interface ParsedPaymentMessage {
-  outcome: PaymentOutcome;
+  outcome: PaymentOutcome.PROCESSED | PaymentOutcome.FAILED;
   inboundEvent: InboundEventRef;
   /** Failure reason (payment-failed only), normalised to '' when absent. */
   reason?: string;
@@ -58,7 +58,7 @@ export function parsePaymentMessage(topic: string, rawValue: Buffer | null): Par
   const orderId = readUuid(fields, 'orderId');
 
   let dto: PaymentProcessedMessageDto | PaymentFailedMessageDto;
-  let outcome: PaymentOutcome;
+  let outcome: PaymentOutcome.PROCESSED | PaymentOutcome.FAILED;
   if (topic === PAYMENT_PROCESSED_TOPIC) {
     dto = plainToInstance(PaymentProcessedMessageDto, fields);
     outcome = PaymentOutcome.PROCESSED;

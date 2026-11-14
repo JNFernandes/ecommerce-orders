@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { CommandBus } from '@nestjs/cqrs';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
 import { KafkaConfig } from '../../config/configuration';
-import { ReactToPaymentOutcomeCommand } from '../../commands/react-to-payment-outcome.command';
+import { ApplyPaymentOutcomeCommand } from '../../commands/apply-payment-outcome.command';
 import { ConsumedMessageDeadLetterRepository } from '../../repositories/consumed-message-dead-letter.repository';
 import { consumeWithDeadLetter } from './consume-with-dead-letter';
 import { KafkaConnectLoop } from './kafka-connect-loop';
@@ -24,8 +24,9 @@ import {
 /**
  * Inbound adapter for payment outcomes (`payments.payment-processed`, `payments.payment-failed`).
  * Like a controller, it only does I/O: it validates each message, dispatches
- * ReactToPaymentOutcomeCommand, and commits the offset manually — only after the outcome has
- * been durably saved. Business rules live in the domain (decidePaymentReaction).
+ * ApplyPaymentOutcomeCommand, and commits the offset manually — only after the outcome has
+ * been durably saved. Business rules live in the domain (`Order.recordPayment*()`): a
+ * processed payment confirms the order only once its stock is also reserved.
  *
  * Failure handling: malformed messages are dead-lettered at once; any other failure is retried
  * with exponential backoff and then dead-lettered. Either way the offset is committed after the
@@ -145,7 +146,7 @@ export class PaymentEventsConsumer implements OnApplicationBootstrap, OnApplicat
 
   private handle(parsed: ParsedPaymentMessage): Promise<unknown> {
     return this.commandBus.execute(
-      new ReactToPaymentOutcomeCommand(parsed.outcome, parsed.inboundEvent, parsed.reason),
+      new ApplyPaymentOutcomeCommand(parsed.outcome, parsed.inboundEvent, parsed.reason),
     );
   }
 }
