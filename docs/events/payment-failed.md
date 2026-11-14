@@ -9,7 +9,8 @@
 consumer group `KAFKA_GROUP_ID` (default `ecommerce-orders-consumer`). Introduced by US-04.
 
 **Meaning**: the payment for an order failed (today, the amount was over the Payments policy
-threshold). Orders cancels the order and keeps the reason (saga step 3 in
+threshold). Orders cancels the order at once, whatever the stock outcome, and keeps the reason
+([ADR 0006](../adr/0006-order-joins-payment-and-stock-outcomes.md), extending
 [ADR 0003](../adr/0003-saga-by-choreography.md)).
 
 ## Payload
@@ -33,19 +34,22 @@ threshold). Orders cancels the order and keeps the reason (saga step 3 in
 | `aggregateId` | UUID | yes | **The payment id.** Logged and stored as `paymentId`. **Never used as an order id.** |
 | `version` | integer | yes, must be `1` | Any other value means the message is malformed. |
 | `orderId` | UUID | yes | **The order to cancel.** |
-| `reason` | string | no (free text) | Stored as `orders.cancellationReason` and carried on `OrderCancelled.reason`. Missing or `null` is stored as `""`. Any non-string value means the message is malformed. |
+| `reason` | string | no (free text) | Stored as `orders.cancellationReason = "payment failed: <reason>"` and carried on `OrderCancelled.reason` (since US-09; before, the bare reason). Missing, `null` or empty gives just `payment failed`. Any non-string value means the message is malformed. |
 | `failedAt` | ISO 8601 | no | Not used. |
 
 Unknown extra fields are ignored. The message key (set by Payments to the payment id) is not used.
 
 ## What Orders does
 
-| Order status (looked up by `orderId`) | Effect | Event published |
-|---|---|---|
-| `PENDING` | → `CANCELLED` with `cancellationReason = reason`, through the same write flow as `POST /orders/:id/cancel` | exactly one `OrderCancelled`, with `reason` |
-| `CANCELLED` | nothing (`IGNORED_ALREADY_CANCELLED`) | none |
-| `CONFIRMED` | nothing, plus a warning log (`IGNORED_CONFLICT`) | none |
-| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) and retried later by the dead-letter worker | none |
+| Order (looked up by `orderId`) | Effect | Event published | `processed_events.outcome` |
+|---|---|---|---|
+| `PENDING`, payment pending (any stock outcome) | payment outcome → `FAILED`, order → `CANCELLED` with `payment failed: <reason>` | exactly one `OrderCancelled`, with that `reason` | `CANCELLED` |
+| `PENDING`, payment already processed | nothing, plus a **warning**: the first payment outcome wins | none | `IGNORED_CONFLICT` |
+| `CANCELLED` | nothing, informational log | none | `IGNORED_ALREADY_CANCELLED` |
+| `CONFIRMED` | nothing, plus a **warning** (conflict) | none | `IGNORED_CONFLICT` |
+| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) and retried later by the dead-letter worker | none | — |
+
+The rules live in the `Order` aggregate (`recordPaymentFailed()`).
 
 ## Delivery guarantees
 
