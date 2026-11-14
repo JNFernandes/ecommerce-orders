@@ -5,6 +5,7 @@ import { PaymentOutcome } from '../../../src/domain/payment-outcome.enum';
 import { StockOutcome } from '../../../src/domain/stock-outcome.enum';
 import { Attention, OutcomeRecord } from '../../../src/domain/outcome-application';
 import { OrderConfirmed } from '../../../src/domain/events/order-confirmed.event';
+import { OrderCancelled } from '../../../src/domain/events/order-cancelled.event';
 
 const CUSTOMER_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
 const ORDER_ID = '4889fbea-c49f-4094-8ca9-45d79508477e';
@@ -152,6 +153,125 @@ describe('Order outcomes — positive outcomes on a PENDING order', () => {
     const result = order.recordStockReserved();
 
     expect(result).toEqual({ record: OutcomeRecord.IGNORED_DUPLICATE, attention: Attention.NONE });
+    expect(order.stockOutcome).toBe(StockOutcome.RESERVED);
+    expect(order.pullDomainEvents()).toEqual([]);
+  });
+});
+
+describe('Order outcomes — negative outcomes on a PENDING order', () => {
+  it('should cancel with a "payment failed" reason and raise OrderCancelled when the payment fails', () => {
+    const order = placedOrder();
+
+    const result = order.recordPaymentFailed('amount exceeds the threshold');
+
+    expect(result).toEqual({ record: OutcomeRecord.CANCELLED, attention: Attention.NONE });
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.paymentOutcome).toBe(PaymentOutcome.FAILED);
+    expect(order.cancellationReason).toBe('payment failed: amount exceeds the threshold');
+    const events = order.pullDomainEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toBeInstanceOf(OrderCancelled);
+    expect((events[0] as OrderCancelled).reason).toBe(
+      'payment failed: amount exceeds the threshold',
+    );
+  });
+
+  it('should cancel with a "stock rejected" reason and raise OrderCancelled when the stock is rejected', () => {
+    const order = placedOrder();
+
+    const result = order.recordStockRejected('insufficient stock');
+
+    expect(result).toEqual({ record: OutcomeRecord.CANCELLED, attention: Attention.NONE });
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.stockOutcome).toBe(StockOutcome.REJECTED);
+    expect(order.cancellationReason).toBe('stock rejected: insufficient stock');
+    const events = order.pullDomainEvents();
+    expect(events).toHaveLength(1);
+    expect((events[0] as OrderCancelled).reason).toBe('stock rejected: insufficient stock');
+  });
+
+  it('should cancel when the stock is rejected after the payment was processed', () => {
+    const order = storedOrder(OrderStatus.PENDING, PaymentOutcome.PROCESSED, StockOutcome.PENDING);
+
+    const result = order.recordStockRejected('unknown product');
+
+    expect(result.record).toBe(OutcomeRecord.CANCELLED);
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.paymentOutcome).toBe(PaymentOutcome.PROCESSED);
+    expect(order.stockOutcome).toBe(StockOutcome.REJECTED);
+    expect(order.cancellationReason).toBe('stock rejected: unknown product');
+  });
+
+  it('should cancel when the payment fails after the stock was reserved', () => {
+    const order = storedOrder(OrderStatus.PENDING, PaymentOutcome.PENDING, StockOutcome.RESERVED);
+
+    const result = order.recordPaymentFailed('card declined');
+
+    expect(result.record).toBe(OutcomeRecord.CANCELLED);
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.cancellationReason).toBe('payment failed: card declined');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['whitespace-only', '   '],
+  ])('should use the bare "payment failed" reason when the reason is %s', (_label, reason) => {
+    const order = placedOrder();
+
+    order.recordPaymentFailed(reason);
+
+    expect(order.cancellationReason).toBe('payment failed');
+    expect((order.pullDomainEvents()[0] as OrderCancelled).reason).toBe('payment failed');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['whitespace-only', '   '],
+  ])('should use the bare "stock rejected" reason when the reason is %s', (_label, reason) => {
+    const order = placedOrder();
+
+    order.recordStockRejected(reason);
+
+    expect(order.cancellationReason).toBe('stock rejected');
+  });
+
+  it('should trim the source reason before building the cancellation reason', () => {
+    const order = placedOrder();
+
+    order.recordStockRejected('  insufficient stock  ');
+
+    expect(order.cancellationReason).toBe('stock rejected: insufficient stock');
+  });
+
+  it('should ignore a failed payment as a conflict when the payment was already processed', () => {
+    const order = storedOrder(OrderStatus.PENDING, PaymentOutcome.PROCESSED, StockOutcome.PENDING);
+    const before = order.updatedAt;
+
+    const result = order.recordPaymentFailed('late failure');
+
+    expect(result).toEqual({
+      record: OutcomeRecord.IGNORED_CONFLICT,
+      attention: Attention.CONFLICT,
+    });
+    expect(order.status).toBe(OrderStatus.PENDING);
+    expect(order.paymentOutcome).toBe(PaymentOutcome.PROCESSED);
+    expect(order.cancellationReason).toBeNull();
+    expect(order.updatedAt).toBe(before);
+    expect(order.pullDomainEvents()).toEqual([]);
+  });
+
+  it('should ignore a rejected stock as a conflict when the stock was already reserved', () => {
+    const order = storedOrder(OrderStatus.PENDING, PaymentOutcome.PENDING, StockOutcome.RESERVED);
+
+    const result = order.recordStockRejected('insufficient stock');
+
+    expect(result).toEqual({
+      record: OutcomeRecord.IGNORED_CONFLICT,
+      attention: Attention.CONFLICT,
+    });
+    expect(order.status).toBe(OrderStatus.PENDING);
     expect(order.stockOutcome).toBe(StockOutcome.RESERVED);
     expect(order.pullDomainEvents()).toEqual([]);
   });

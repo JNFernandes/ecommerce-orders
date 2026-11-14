@@ -103,9 +103,58 @@ export class Order {
       );
     }
 
+    this.markCancelled(reason ?? null);
+  }
+
+  /**
+   * Records that the payment for this order failed (`payments.payment-failed`). On a PENDING
+   * order whose payment outcome is still pending it cancels the order at once, whatever the
+   * stock outcome, with the reason `payment failed: <reason>`. A failure after the payment was
+   * already processed contradicts it: the first payment outcome wins and this one is ignored
+   * as a conflict. Never throws.
+   *
+   * @param reason The failure reason announced by Payments; may be empty.
+   */
+  recordPaymentFailed(reason?: string): OutcomeApplication {
+    if (this.paymentOutcome === PaymentOutcome.PROCESSED) {
+      return { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
+    }
+
+    this.paymentOutcome = PaymentOutcome.FAILED;
+    this.markCancelled(Order.cancellationReasonFor('payment failed', reason));
+    return { record: OutcomeRecord.CANCELLED, attention: Attention.NONE };
+  }
+
+  /**
+   * Records that the stock for this order was rejected (`inventory.stock-rejected`). On a
+   * PENDING order whose stock outcome is still pending it cancels the order at once, whatever
+   * the payment outcome, with the reason `stock rejected: <reason>`. A rejection after the
+   * stock was already reserved contradicts it: the first stock outcome wins and this one is
+   * ignored as a conflict. Never throws.
+   *
+   * @param reason The rejection reason announced by Inventory; may be empty.
+   */
+  recordStockRejected(reason?: string): OutcomeApplication {
+    if (this.stockOutcome === StockOutcome.RESERVED) {
+      return { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
+    }
+
+    this.stockOutcome = StockOutcome.REJECTED;
+    this.markCancelled(Order.cancellationReasonFor('stock rejected', reason));
+    return { record: OutcomeRecord.CANCELLED, attention: Attention.NONE };
+  }
+
+  /** `<prefix>: <reason>`, or the bare prefix when the trimmed reason is empty or missing. */
+  private static cancellationReasonFor(prefix: string, reason?: string): string {
+    const trimmed = reason?.trim() ?? '';
+    return trimmed === '' ? prefix : `${prefix}: ${trimmed}`;
+  }
+
+  /** The PENDING → CANCELLED transition shared by cancel() and the outcome methods. */
+  private markCancelled(reason: string | null): void {
     this.status = OrderStatus.CANCELLED;
     this.updatedAt = new Date();
-    this.cancellationReason = reason ?? null;
+    this.cancellationReason = reason;
     this.domainEvents.push(OrderCancelled.from(this));
   }
 
