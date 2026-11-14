@@ -113,7 +113,7 @@ All [P]: separate files. Keep `docs/events/` consistent with `ecommerce-infra/do
 
 ## Phase 8: Polish
 
-- [ ] T030 Run `npm run test:cov` and confirm ≥ 80% on `src/domain` and `src/services`; walk through [quickstart.md](quickstart.md) section 2 against the local infra; write down, for the final summary, the differences left in `ecommerce-infra/docs/events.md` (research R12). No commit unless a fix was needed. **Gate.**
+- [X] T030 Run `npm run test:cov` and confirm ≥ 80% on `src/domain` and `src/services`; walk through [quickstart.md](quickstart.md) section 2 against the local infra; write down, for the final summary, the differences left in `ecommerce-infra/docs/events.md` (research R12). No commit unless a fix was needed. **Gate.**
 
 ---
 
