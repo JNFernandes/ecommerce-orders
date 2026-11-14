@@ -9,6 +9,7 @@ import { OrderCancellationError } from './order-cancellation.error';
 import { OrderConfirmationError } from './order-confirmation.error';
 import { PaymentOutcome } from './payment-outcome.enum';
 import { StockOutcome } from './stock-outcome.enum';
+import { Attention, OutcomeApplication, OutcomeRecord } from './outcome-application';
 
 export interface RawOrderItem {
   productId: string;
@@ -120,6 +121,53 @@ export class Order {
       );
     }
 
+    this.markConfirmed();
+  }
+
+  /**
+   * Records that the payment for this order succeeded (`payments.payment-processed`). On a
+   * PENDING order it confirms the order when the stock is already reserved, and otherwise
+   * records the outcome and waits for the stock. Never throws.
+   */
+  recordPaymentProcessed(): OutcomeApplication {
+    if (this.paymentOutcome === PaymentOutcome.PROCESSED) {
+      return { record: OutcomeRecord.IGNORED_DUPLICATE, attention: Attention.NONE };
+    }
+
+    this.paymentOutcome = PaymentOutcome.PROCESSED;
+    return this.confirmIfBothPositive();
+  }
+
+  /**
+   * Records that the stock for this order was reserved (`inventory.stock-reserved`). On a
+   * PENDING order it confirms the order when the payment is already processed, and otherwise
+   * records the outcome and waits for the payment. Never throws.
+   */
+  recordStockReserved(): OutcomeApplication {
+    if (this.stockOutcome === StockOutcome.RESERVED) {
+      return { record: OutcomeRecord.IGNORED_DUPLICATE, attention: Attention.NONE };
+    }
+
+    this.stockOutcome = StockOutcome.RESERVED;
+    return this.confirmIfBothPositive();
+  }
+
+  /** Confirms the order once both outcomes are positive; otherwise only refreshes updatedAt. */
+  private confirmIfBothPositive(): OutcomeApplication {
+    if (
+      this.paymentOutcome === PaymentOutcome.PROCESSED &&
+      this.stockOutcome === StockOutcome.RESERVED
+    ) {
+      this.markConfirmed();
+      return { record: OutcomeRecord.CONFIRMED, attention: Attention.NONE };
+    }
+
+    this.updatedAt = new Date();
+    return { record: OutcomeRecord.RECORDED, attention: Attention.NONE };
+  }
+
+  /** The PENDING → CONFIRMED transition shared by confirm() and the outcome methods. */
+  private markConfirmed(): void {
     this.status = OrderStatus.CONFIRMED;
     this.updatedAt = new Date();
     this.domainEvents.push(OrderConfirmed.from(this));
