@@ -1,6 +1,7 @@
 # 0003. Order/payment saga by choreography
 
-- **Status**: Accepted
+- **Status**: Accepted (extended by [0006](0006-order-joins-payment-and-stock-outcomes.md): Orders also
+  waits for the stock outcome)
 - **Date**: 2026-11-11
 
 ## Context

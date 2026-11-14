@@ -75,8 +75,16 @@ warning (`--max-warnings 0`), or a formatting violation.
   `src/infra/kafka/order-projection.consumer.ts` (group `KAFKA_PROJECTION_GROUP_ID`, US-05).
 - `OrderCancelled` has an optional `reason` (payment failures only; omitted for REST cancels).
 - Every payload: `eventId` (UUID), `occurredAt` (ISO), `aggregateId` (UUID), `version` (int), JSON.
-- Payment events identify the order by **`orderId`**. Their `aggregateId` is the payment id: never
-  use it as an order id.
+- Planned consumed: `inventory.stock-reserved` and `inventory.stock-rejected` (published by
+  ecommerce-inventory), same consumer rules as the payment consumer.
+- Payment and Inventory events identify the order by **`orderId`**. Their `aggregateId` is the
+  payment id / reservation id: never use it as an order id.
+- Order lifecycle (constitution 1.2.0, ADR 0006): confirm only when payment processed **and**
+  stock reserved; cancel as soon as payment fails **or** stock is rejected; outcomes arrive in any
+  order; an outcome for a non-`PENDING` order is ignored and logged. The join lives in
+  `src/domain/`, never in consumers or services. Until the stock consumer lands, the code still
+  confirms on payment alone.
+- `docs/events/` must stay consistent with `ecommerce-infra/docs/events.md`.
 - Consumers: idempotent (dedupe by `eventId` in `processed_events`, written in the same
   transaction as the state change), commit offsets only after the DB save, retry with exponential
   backoff (`retry-with-backoff.ts`), then dead-letter to `consumed_message_dead_letters`. A

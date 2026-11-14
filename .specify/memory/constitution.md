@@ -1,6 +1,63 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change:    1.1.0 → 1.2.0
+Bump rationale:    MINOR — materially expanded guidance: two new consumed topics (Inventory stock
+                   outcomes) and a joined order lifecycle (confirm on payment AND stock, cancel
+                   on either failure). No principle removed or renamed.
+
+Modified principles:
+  - I. Domain-Driven Design & Layered Architecture — order lifecycle rule added: an order is
+    confirmed only when the payment is processed AND the stock is reserved; it is cancelled as
+    soon as either the payment fails or the stock is rejected; outcomes may arrive in any order;
+    outcomes for an order that is no longer PENDING are ignored and logged. The join is
+    implemented in the Domain layer.
+  - III. Write Flow Integrity — status transitions driven by the two outcomes follow the same
+    save-first-then-publish sequence; recording the first outcome of a pending order is a
+    persisted state change but does not change `OrderStatus`.
+  - VII. Kafka Events (Producer & Consumers) — consumed topics `inventory.stock-reserved` and
+    `inventory.stock-rejected` (published by ecommerce-inventory); their `aggregateId` is the
+    reservation id and MUST NOT be used as an order id (order identified by `orderId`); offsets
+    committed only after the PostgreSQL save, same consumer rules as the payment consumers.
+
+Added sections:
+  - (no new top-level sections)
+  - Documentation Standards: Kafka payload documentation in this repo MUST stay consistent with
+    `ecommerce-infra/docs/events.md`.
+
+Removed sections:
+  - (none)
+
+Templates reviewed:
+  ✅ .specify/templates/plan-template.md  — Constitution Check gates derive from this file at runtime; no static change needed.
+  ✅ .specify/templates/spec-template.md  — Generic structure; no mandatory section added or removed.
+  ✅ .specify/templates/tasks-template.md — Consumer/domain work fits existing phases; no new task category.
+  ✅ .specify/templates/commands/*.md     — Directory not present in this project; nothing to update.
+
+Runtime guidance:
+  ✅ README.md — order lifecycle and events table describe the payment + stock join (stock
+    consumer marked planned).
+  ✅ CLAUDE.md — event contracts and order lifecycle updated.
+  ✅ docs/adr/0006-order-joins-payment-and-stock-outcomes.md — added (0004 is already taken by
+    the read-model projection ADR; ADR numbers are never reused). docs/adr/README.md index
+    updated; ADR 0003 marked as extended by 0006.
+
+Migration note (code that must change, Governance → Amendment procedure):
+  ⚠ Today `decidePaymentReaction` / `ReactToPaymentOutcomeService` confirm an order on
+    `payments.payment-processed` alone. A follow-up story MUST add the stock consumer, record
+    each outcome on the `Order` aggregate and confirm only once both have succeeded.
+  ⚠ `POST /orders/:orderId/confirm` confirms a PENDING order manually, bypassing the join. The
+    follow-up story MUST decide whether to remove it or restrict it, and record that decision.
+  ⚠ docs/events/ has no stock-reserved.md / stock-rejected.md yet; add them with the consumer,
+    consistent with ecommerce-infra/docs/events.md.
+
+Deferred TODOs:
+  (none)
+-->
+
+<!--
+SYNC IMPACT REPORT (previous amendment)
+=======================================
 Version change:    1.0.0 → 1.1.0
 Bump rationale:    MINOR — materially expanded guidance (Kafka consumers, MongoDB read model,
                    ADR numbering, local infrastructure) plus consolidation of the duplicated
@@ -60,6 +117,23 @@ The codebase MUST follow a strict four-layer model: **Controller → Service →
 `Order` is the aggregate root. `OrderItem` is a value object. Domain events (`OrderPlaced`, `OrderConfirmed`, `OrderCancelled`) are raised by the domain and consumed by infrastructure.
 Placing business logic in controllers or services is a constitutional violation and MUST be rejected in code review.
 
+**Order lifecycle.** An order is placed `PENDING` and waits for two independent outcomes: the
+payment outcome (from Payments) and the stock outcome (from Inventory).
+
+- An order MUST be confirmed (`PENDING → CONFIRMED`) only when **both** the payment has been
+  processed **and** the stock has been reserved.
+- An order MUST be cancelled (`PENDING → CANCELLED`) as soon as **either** the payment fails
+  **or** the stock is rejected, without waiting for the other outcome.
+- The two outcomes MAY arrive in any order. A first successful outcome is recorded on the
+  pending order and the order stays `PENDING` until the second one arrives.
+- An outcome that arrives for an order that is no longer `PENDING` MUST be ignored (no state
+  change, no event published) and logged.
+- This join is business logic: it MUST be implemented in the Domain layer (the `Order` aggregate
+  or a pure domain policy). Kafka consumers and services MUST NOT decide it.
+
+Rationale: confirming on payment alone would confirm orders whose stock cannot be delivered;
+see `docs/adr/0006-order-joins-payment-and-stock-outcomes.md`.
+
 ### II. CQRS Separation (NON-NEGOTIABLE)
 
 Write and read paths are architecturally separate and MUST NEVER be mixed.
@@ -89,6 +163,12 @@ The write flow MUST follow this exact sequence and MUST NOT deviate:
 5. **Only after** a successful database save: publish the corresponding Kafka event.
 
 Publishing to Kafka before a confirmed database save is a critical violation. If the DB save fails, no Kafka message MUST be emitted. Command handlers are responsible for enforcing this order. `OrderStatus` transitions (`PENDING → CONFIRMED`, `PENDING → CANCELLED`) are only final once persisted.
+
+The same sequence applies when the transition is driven by a payment or stock outcome (see the
+order lifecycle in Principle I): the domain decides, the new state is saved to PostgreSQL, and
+only then is `OrderConfirmed` or `OrderCancelled` published. Recording the first successful
+outcome of a pending order is a persisted state change that leaves `OrderStatus` at `PENDING`
+and publishes no event.
 
 ### IV. Type Safety & Input Validation
 
@@ -135,8 +215,13 @@ Kafka is the event bus between services. This service both **produces** and **co
 - `orders.order-cancelled`
 
 **Consumed topics:**
-- `payments.payment-processed` — confirms the referenced order.
+- `payments.payment-processed` — records the payment success; confirms the referenced order once
+  the stock is also reserved (Principle I).
 - `payments.payment-failed` — cancels the referenced order.
+- `inventory.stock-reserved` (published by ecommerce-inventory) — records the stock reservation;
+  confirms the referenced order once the payment is also processed (Principle I).
+- `inventory.stock-rejected` (published by ecommerce-inventory) — cancels the referenced order.
+- The authoritative contract for every cross-service topic is `ecommerce-infra/docs/events.md`.
 - This service's own `orders.*` events — feed the projection that builds the MongoDB read model
   (see Principle II).
 
@@ -150,6 +235,8 @@ Kafka is the event bus between services. This service both **produces** and **co
 - For `orders.*` events, `aggregateId` is the order id.
 - Payment events identify the order by their `orderId` field. Their `aggregateId` is the
   **payment id** and MUST NOT be used as an order id.
+- Inventory events identify the order by their `orderId` field, exactly like payment events.
+  Their `aggregateId` is the **reservation id** and MUST NOT be used as an order id.
 - Payloads MUST be serialized as JSON.
 - Breaking changes to a payload schema require a new topic version (e.g. `orders.order-placed.v2`).
 - Event classes MUST be documented with JSDoc describing every field.
@@ -163,7 +250,9 @@ Kafka is the event bus between services. This service both **produces** and **co
 - Consumers MUST be idempotent: events are deduplicated by `eventId`, and processing the same
   event twice MUST produce the same result.
 - Offsets MUST be committed only after the resulting database save has succeeded (PostgreSQL for
-  payment consumers, MongoDB for the projection).
+  the payment and stock consumers, MongoDB for the projection).
+- The stock consumers follow exactly the same rules as the payment consumers: dedupe by
+  `eventId` in the same transaction as the state change, retry with backoff, then dead-letter.
 - Failed processing MUST be retried with exponential backoff; once retries are exhausted the
   event MUST be dead-lettered and the failure logged with full context.
 - State changes driven by consumed events MUST go through the same Domain → Repository path as
@@ -269,6 +358,9 @@ All public classes, methods, and interfaces MUST carry JSDoc comments.
 GraphQL types and fields MUST include `description` strings visible in the generated schema.
 Swagger/OpenAPI annotations MUST be present on all REST endpoints and DTOs so that the spec is auto-generated without manual editing.
 Kafka event payloads MUST be documented (field names, types, semantics) in `docs/events/` or inline in the event class JSDoc.
+That documentation MUST stay consistent with the platform-wide contract in
+`ecommerce-infra/docs/events.md`: a payload change updates both in the same change, and a
+discrepancy is a defect.
 Each NestJS module MUST include a `README.md` describing its responsibility, exposed endpoints/queries, and domain events it produces or consumes.
 Architectural decisions MUST be recorded as ADRs in `docs/adr/` using the standard template (Context / Decision / Consequences).
 ADRs are numbered sequentially with a four-digit prefix (`0001-short-title.md`, `0002-...`), are
@@ -288,4 +380,4 @@ This constitution supersedes all other project conventions and style guides. Whe
 
 **Compliance**: Every PR review MUST verify that no constitutional principle is violated. Reviewers are empowered to block merges for violations without exception. New principles take effect immediately upon merge.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-11-11
+**Version**: 1.2.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-11-14

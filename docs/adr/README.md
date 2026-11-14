@@ -18,6 +18,7 @@ requires (Documentation Standards).
 |---|---|---|
 | [0001](0001-cqrs-read-model-in-orders-service.md) | CQRS read model lives inside the Orders service | Accepted |
 | [0002](0002-polyglot-persistence.md) | Polyglot persistence: PostgreSQL for invariants, MongoDB for read shapes | Accepted |
-| [0003](0003-saga-by-choreography.md) | Order/payment saga by choreography | Accepted |
+| [0003](0003-saga-by-choreography.md) | Order/payment saga by choreography | Accepted, extended by [0006](0006-order-joins-payment-and-stock-outcomes.md) |
 | [0004](0004-read-model-projection-consistency.md) | Read-model projection: order-independent, idempotent and deterministic | Accepted |
 | [0005](0005-dead-letter-retry.md) | Dead-letter retry: per-row transactions with SKIP LOCKED and a self-rescheduling worker | Accepted |
+| [0006](0006-order-joins-payment-and-stock-outcomes.md) | Orders joins the payment and stock outcomes (choreographed saga with a join) | Accepted |

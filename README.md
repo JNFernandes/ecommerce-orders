@@ -2,7 +2,19 @@
 
 The Orders microservice of the ecommerce platform. It owns the `Order` aggregate: it places,
 confirms and cancels orders, stores them in PostgreSQL, and publishes order events to Kafka for
-other services (Payments, and later Inventory and Notifications) to react to.
+other services (Payments, Inventory, and later Notifications) to react to.
+
+### Order lifecycle
+
+An order is placed `PENDING` and waits for two outcomes, which may arrive in either order
+(constitution v1.2.0, [ADR 0006](docs/adr/0006-order-joins-payment-and-stock-outcomes.md)):
+
+- **Confirmed** only when the payment is processed **and** the stock is reserved.
+- **Cancelled** as soon as the payment fails **or** the stock is rejected.
+- An outcome for an order that is no longer `PENDING` is ignored and logged.
+
+The join is decided in the Domain layer. **Status:** the stock consumer is planned; until it
+lands, the service still confirms on `payments.payment-processed` alone.
 
 Built with NestJS and TypeScript, following DDD and CQRS. The rules this codebase must follow are
 in the [project constitution](.specify/memory/constitution.md).
@@ -51,12 +63,17 @@ See [`src/README.md`](src/README.md) for the folder layout.
 | `OrderCancelled` | `orders.order-cancelled` | Produced | Built |
 | `PaymentProcessed` | `payments.payment-processed` | Consumed: confirms the order | Built |
 | `PaymentFailed` | `payments.payment-failed` | Consumed: cancels the order, stores the reason | Built |
+| `StockReserved` | `inventory.stock-reserved` | Consumed: confirms the order once the payment is also processed | Planned |
+| `StockRejected` | `inventory.stock-rejected` | Consumed: cancels the order, stores the reason | Planned |
 | `orders.*` (own events) | `orders.*` | Consumed: builds the read model (`order_views`) | Built |
 
-Every event carries `eventId`, `occurredAt`, `aggregateId` and `version`. Payment events
-reference the order by `orderId`; their `aggregateId` is the payment id. Consumers dedupe by
-`eventId`. The order/payment flow is a choreographed saga ([ADR 0003](docs/adr/0003-saga-by-choreography.md)).
-Payload details are in [`docs/events/`](docs/events/).
+Every event carries `eventId`, `occurredAt`, `aggregateId` and `version`. Payment and Inventory
+events reference the order by `orderId`; their `aggregateId` is the payment id or the
+reservation id, never the order id. Consumers dedupe by `eventId`. The order saga is
+choreographed ([ADR 0003](docs/adr/0003-saga-by-choreography.md)), with Orders joining the
+payment and stock outcomes ([ADR 0006](docs/adr/0006-order-joins-payment-and-stock-outcomes.md)).
+Payload details are in [`docs/events/`](docs/events/) and must stay consistent with the
+platform contract in `ecommerce-infra/docs/events.md`.
 
 ### Payment outcome consumer
 
