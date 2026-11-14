@@ -51,6 +51,19 @@ the compensations are already triggered by `OrderCancelled`.
   stays held.
 - An order stays `PENDING` while either outcome is missing; a lost or dead-lettered event leaves
   it stuck. The stuck-order timeout noted in ADR 0003 becomes more important.
-- Existing code must change: today Orders confirms on `PaymentProcessed` alone, and
-  `POST /orders/:orderId/confirm` confirms manually, bypassing the join. The story that adds the
-  stock consumer has to rework the payment reaction and decide the fate of the manual endpoint.
+- Payment and stock outcomes for the same order arrive on different topics with different keys,
+  so they can be processed concurrently, even by two instances. The outcome write is therefore
+  guarded on the order still being `PENDING` **and** still having the outcomes it was loaded
+  with; the losing writer gets a retryable error, reloads the order and sees the other outcome.
+  Without that guard, two "first positive outcome" writes could both succeed and leave an order
+  `PENDING` with both outcomes positive and no confirmation.
+- A second outcome on the same side that contradicts the first (payment failed after payment
+  processed, stock rejected after stock reserved) is ignored with a conflict warning: the first
+  outcome of each side wins, as for the payment reaction in US-04.
+- `POST /orders/:orderId/confirm` stays as an **operator override** (decided in US-09, spec
+  FR-020): it confirms any `PENDING` order whatever its outcomes and leaves the recorded outcomes
+  unchanged. It is the only way to confirm an order without both positive outcomes, and only an
+  operator can call it. Outcomes that arrive afterwards are ignored; a negative one logs a
+  conflict warning. `POST /orders/:orderId/cancel` is unchanged.
+- Implemented by US-09: the US-04 payment reaction (confirm on `PaymentProcessed` alone) was
+  replaced by the join.

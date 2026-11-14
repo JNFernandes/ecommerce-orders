@@ -5,16 +5,23 @@ import { randomUUID } from 'crypto';
 import { Order } from '../domain/order.aggregate';
 import { OrderItem } from '../domain/order-item.value-object';
 import { OrderStatus } from '../domain/order-status.enum';
+import { PaymentOutcome } from '../domain/payment-outcome.enum';
+import { StockOutcome } from '../domain/stock-outcome.enum';
+import { OutcomeRecord } from '../domain/outcome-application';
 import { OrderEntity } from '../infra/database/entities/order.entity';
 import { OrderItemEntity } from '../infra/database/entities/order-item.entity';
-import {
-  ProcessedEventEntity,
-  ProcessedEventOutcome,
-} from '../infra/database/entities/processed-event.entity';
+import { ProcessedEventEntity } from '../infra/database/entities/processed-event.entity';
 import { InboundEventRef } from '../commands/inbound-event-ref';
-import { EventAlreadyProcessedError } from '../services/errors/payment-outcome.errors';
+import { EventAlreadyProcessedError } from '../services/errors/outcome.errors';
 import { OrderStatusChangedConcurrentlyError } from './errors/order-status-changed-concurrently.error';
 import { isUniqueViolation } from './errors/is-unique-violation';
+import { toProcessedEventOutcome } from './processed-event-outcome.mapping';
+
+/** The outcomes an order had when it was loaded; the outcome write is guarded on them. */
+export interface LoadedOutcomes {
+  paymentOutcome: PaymentOutcome;
+  stockOutcome: StockOutcome;
+}
 
 /** Persists the Order aggregate (and its consolidated items) to PostgreSQL. */
 @Injectable()
@@ -30,6 +37,8 @@ export class OrderRepository {
       id: order.id,
       customerId: order.customerId,
       status: order.status,
+      paymentOutcome: order.paymentOutcome,
+      stockOutcome: order.stockOutcome,
       totalAmount: order.totalAmount.toFixed(2),
       items: order.items.map((item) => {
         const itemEntity = new OrderItemEntity();
@@ -66,6 +75,8 @@ export class OrderRepository {
       entity.createdAt,
       entity.updatedAt,
       entity.cancellationReason,
+      entity.paymentOutcome,
+      entity.stockOutcome,
     );
   }
 
@@ -75,17 +86,24 @@ export class OrderRepository {
   }
 
   /**
-   * Persists a status transition triggered by a consumed event, atomically with the
-   * `processed_events` record for that event. The update only applies while the order is still
-   * PENDING, so a concurrent change (e.g. a REST cancel) is never overwritten.
+   * Persists the result of applying a payment or stock outcome (`Order.record*()`) atomically
+   * with the `processed_events` record for the inbound event. The update applies only while
+   * the order is still PENDING **and** still has the outcomes it was loaded with, so two
+   * outcomes processed concurrently for the same order can never both win: the second writer
+   * gets OrderStatusChangedConcurrentlyError, is retried, reloads the order and sees the other
+   * outcome.
    *
-   * @throws OrderStatusChangedConcurrentlyError if the order was no longer PENDING (retryable).
+   * @param loaded The order's outcomes as loaded, before the domain method ran.
+   * @param record What the domain decided; stored as the processed-event outcome.
+   * @throws OrderStatusChangedConcurrentlyError if the order changed since it was loaded
+   *   (retryable).
    * @throws EventAlreadyProcessedError if the event's `eventId` is already recorded.
    */
-  async applyInboundStatusChange(
+  async applyOutcome(
     order: Order,
+    loaded: LoadedOutcomes,
     inbound: InboundEventRef,
-    outcome: ProcessedEventOutcome,
+    record: OutcomeRecord,
   ): Promise<void> {
     try {
       await this.dataSource.transaction(async (manager) => {
@@ -94,13 +112,21 @@ export class OrderRepository {
           .update(OrderEntity)
           .set({
             status: order.status,
-            updatedAt: order.updatedAt,
+            paymentOutcome: order.paymentOutcome,
+            stockOutcome: order.stockOutcome,
             cancellationReason: order.cancellationReason,
+            updatedAt: order.updatedAt,
           })
-          .where('id = :id AND status = :pending', {
-            id: order.id,
-            pending: OrderStatus.PENDING,
-          })
+          .where(
+            'id = :id AND status = :pending AND "paymentOutcome" = :loadedPayment ' +
+              'AND "stockOutcome" = :loadedStock',
+            {
+              id: order.id,
+              pending: OrderStatus.PENDING,
+              loadedPayment: loaded.paymentOutcome,
+              loadedStock: loaded.stockOutcome,
+            },
+          )
           .execute();
         if (!result.affected) {
           throw new OrderStatusChangedConcurrentlyError(order.id);
@@ -110,8 +136,9 @@ export class OrderRepository {
           eventId: inbound.eventId,
           topic: inbound.topic,
           orderId: inbound.orderId,
-          paymentId: inbound.paymentId,
-          outcome,
+          paymentId: inbound.paymentId ?? null,
+          reservationId: inbound.reservationId ?? null,
+          outcome: toProcessedEventOutcome(record),
         });
       });
     } catch (error) {

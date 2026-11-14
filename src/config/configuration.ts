@@ -19,18 +19,24 @@ export interface KafkaConfig {
    */
   projectionGroupId: string;
   /**
-   * Whether the Kafka consumers (payment events and read-model projection) start on bootstrap
-   * (`KAFKA_CONSUMER_ENABLED`, default true).
+   * Consumer group id used by the inventory (stock outcome) events consumer
+   * (`KAFKA_INVENTORY_GROUP_ID`, default `ecommerce-orders-inventory-consumer`). Separate from
+   * `groupId`: two kafkajs consumers with different subscriptions must not share a group.
+   */
+  inventoryGroupId: string;
+  /**
+   * Whether the Kafka consumers (payment events, inventory events and read-model projection)
+   * start on bootstrap (`KAFKA_CONSUMER_ENABLED`, default true).
    */
   consumerEnabled: boolean;
   /**
-   * Attempts before a retryable failure is dead-lettered, for both consumers
+   * Attempts before a retryable failure is dead-lettered, for every consumer
    * (`PAYMENT_CONSUMER_MAX_ATTEMPTS`, default 5; name kept for compatibility).
    */
   maxAttempts: number;
-  /** First retry delay in ms, for both consumers (`PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, default 1000). */
+  /** First retry delay in ms, for every consumer (`PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, default 1000). */
   backoffInitialMs: number;
-  /** Maximum retry delay in ms, for both consumers (`PAYMENT_CONSUMER_BACKOFF_MAX_MS`, default 30000). */
+  /** Maximum retry delay in ms, for every consumer (`PAYMENT_CONSUMER_BACKOFF_MAX_MS`, default 30000). */
   backoffMaxMs: number;
   /**
    * Timeout in ms for opening a broker connection (`KAFKA_CONNECTION_TIMEOUT_MS`, default 1000).
@@ -96,6 +102,7 @@ export default (): AppConfig => ({
     clientId: process.env.KAFKA_CLIENT_ID ?? 'ecommerce-orders',
     groupId: process.env.KAFKA_GROUP_ID ?? 'ecommerce-orders-consumer',
     projectionGroupId: process.env.KAFKA_PROJECTION_GROUP_ID ?? 'ecommerce-orders-projection',
+    inventoryGroupId: process.env.KAFKA_INVENTORY_GROUP_ID ?? 'ecommerce-orders-inventory-consumer',
     consumerEnabled: process.env.KAFKA_CONSUMER_ENABLED !== 'false',
     maxAttempts: parseInt(process.env.PAYMENT_CONSUMER_MAX_ATTEMPTS ?? '5', 10),
     backoffInitialMs: parseInt(process.env.PAYMENT_CONSUMER_BACKOFF_INITIAL_MS ?? '1000', 10),

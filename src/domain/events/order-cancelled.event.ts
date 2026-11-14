@@ -2,9 +2,9 @@ import { randomUUID } from 'crypto';
 import { Order } from '../order.aggregate';
 
 /**
- * Domain event raised by Order.cancel() once a pending order has been cancelled, and
- * published to Kafka topic `orders.order-cancelled` only after the status change is
- * durably saved.
+ * Domain event raised once a pending order has been cancelled — by Order.cancel() (REST) or by
+ * the first negative outcome (`Order.recordPaymentFailed()` / `Order.recordStockRejected()`) —
+ * and published to Kafka topic `orders.order-cancelled` only after the change is durably saved.
  */
 export class OrderCancelled {
   private constructor(
@@ -19,9 +19,9 @@ export class OrderCancelled {
     /** The customer whose order was cancelled. */
     public readonly customerId: string,
     /**
-     * Why the order was cancelled (optional, additive — `version` stays 1). Present only when
-     * the cancellation carried a reason (today: payment failures); omitted from the JSON
-     * otherwise.
+     * Why the order was cancelled (optional, additive — `version` stays 1). Present only for
+     * outcome-driven cancellations (`payment failed: …` or `stock rejected: …`); omitted from the
+     * JSON for REST cancellations.
      */
     public readonly reason?: string,
   ) {}

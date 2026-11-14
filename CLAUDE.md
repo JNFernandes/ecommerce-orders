@@ -70,20 +70,27 @@ warning (`--max-warnings 0`), or a formatting violation.
 ## Event contracts
 
 - Produced: `orders.order-placed`, `orders.order-confirmed`, `orders.order-cancelled`.
-- Consumed: `payments.payment-processed` (confirm) and `payments.payment-failed` (cancel, store
-  `reason`) by `src/infra/kafka/payment-events.consumer.ts` (US-04); own `orders.*` events by
-  `src/infra/kafka/order-projection.consumer.ts` (group `KAFKA_PROJECTION_GROUP_ID`, US-05).
-- `OrderCancelled` has an optional `reason` (payment failures only; omitted for REST cancels).
+- Consumed: `payments.payment-processed` / `payments.payment-failed` by
+  `src/infra/kafka/payment-events.consumer.ts` (group `KAFKA_GROUP_ID`, US-04);
+  `inventory.stock-reserved` / `inventory.stock-rejected` (published by ecommerce-inventory) by
+  `src/infra/kafka/inventory-events.consumer.ts` (group `KAFKA_INVENTORY_GROUP_ID`, US-09); own
+  `orders.*` events by `src/infra/kafka/order-projection.consumer.ts` (group
+  `KAFKA_PROJECTION_GROUP_ID`, US-05).
+- `OrderCancelled` has an optional `reason`: `payment failed: <reason>` or `stock rejected:
+  <reason>` for outcome-driven cancels; omitted for REST cancels.
 - Every payload: `eventId` (UUID), `occurredAt` (ISO), `aggregateId` (UUID), `version` (int), JSON.
-- Planned consumed: `inventory.stock-reserved` and `inventory.stock-rejected` (published by
-  ecommerce-inventory), same consumer rules as the payment consumer.
 - Payment and Inventory events identify the order by **`orderId`**. Their `aggregateId` is the
   payment id / reservation id: never use it as an order id.
 - Order lifecycle (constitution 1.2.0, ADR 0006): confirm only when payment processed **and**
   stock reserved; cancel as soon as payment fails **or** stock is rejected; outcomes arrive in any
-  order; an outcome for a non-`PENDING` order is ignored and logged. The join lives in
-  `src/domain/`, never in consumers or services. Until the stock consumer lands, the code still
-  confirms on payment alone.
+  order; an outcome for a non-`PENDING` order is ignored and logged (warning for a processed
+  payment on a cancelled order: it needs a refund); the first outcome of each side wins. The
+  join lives in the `Order` aggregate (`record*()` methods, returning `{ record, attention }`),
+  never in consumers or services, which go through `ApplyPaymentOutcomeCommand` /
+  `ApplyStockOutcomeCommand` → `OutcomeWriteFlow`. The outcome write is guarded on the outcomes
+  the order was loaded with (`OrderRepository.applyOutcome`), so concurrent outcomes retry
+  instead of both missing the confirmation. `POST /orders/:orderId/confirm` stays an operator
+  override.
 - `docs/events/` must stay consistent with `ecommerce-infra/docs/events.md`.
 - Consumers: idempotent (dedupe by `eventId` in `processed_events`, written in the same
   transaction as the state change), commit offsets only after the DB save, retry with exponential
@@ -94,7 +101,7 @@ warning (`--max-warnings 0`), or a formatting violation.
 - Kafka latency env: `KAFKA_CONNECTION_TIMEOUT_MS` (1000) and `KAFKA_PRODUCER_RETRIES` (1) bound a
   failed publish to about 3 s. They apply to the producer's own kafkajs client only; the
   consumers' client keeps kafkajs's default retries.
-- Consumer env: `KAFKA_GROUP_ID`, `KAFKA_PROJECTION_GROUP_ID`, `MONGO_URI`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
+- Consumer env: `KAFKA_GROUP_ID`, `KAFKA_INVENTORY_GROUP_ID`, `KAFKA_PROJECTION_GROUP_ID`, `MONGO_URI`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
   `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, `PAYMENT_CONSUMER_BACKOFF_MAX_MS`.
 
 ## Dead-letter retry (US-08)

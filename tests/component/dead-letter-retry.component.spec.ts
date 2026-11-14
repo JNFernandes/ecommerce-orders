@@ -38,11 +38,16 @@ import { ProcessedEventRepository } from '../../src/repositories/processed-event
 import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
-import { ReactToPaymentOutcomeService } from '../../src/services/react-to-payment-outcome.service';
+import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
+import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.consumer';
+import { InventoryEventsConsumer } from '../../src/infra/kafka/inventory-events.consumer';
+import { ApplyStockOutcomeService } from '../../src/services/apply-stock-outcome.service';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
 import { PAYMENT_PROCESSED_TOPIC } from '../../src/infra/kafka/payment-message.parser';
+import { STOCK_RESERVED_TOPIC } from '../../src/infra/kafka/stock-message.parser';
+import { StockOutcome } from '../../src/domain/stock-outcome.enum';
 
 jest.setTimeout(240_000);
 
@@ -149,7 +154,9 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
         PlaceOrderService,
         ConfirmOrderService,
         CancelOrderService,
-        ReactToPaymentOutcomeService,
+        OutcomeWriteFlow,
+        ApplyPaymentOutcomeService,
+        ApplyStockOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
@@ -157,6 +164,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
         ConsumedMessageDeadLetterRepository,
         OrderEventsProducer,
         PaymentEventsConsumer,
+        InventoryEventsConsumer,
         OrderProjectionConsumer,
         // The inbound cases here are payment messages, so MongoDB is not needed: the projection
         // service (a dependency of OrderProjectionConsumer, which the worker routes orders.*
@@ -271,6 +279,10 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
 
   it('should re-handle a dead-lettered payment message, and resolve its duplicate without a second confirmation', async () => {
     const orderId = await placeOrder();
+    // Stands in for Inventory: the stock is already reserved, so the payment confirms (US-09).
+    await dataSource.query(`UPDATE orders SET "stockOutcome" = 'RESERVED' WHERE id = $1`, [
+      orderId,
+    ]);
     const eventId = randomUUID();
 
     const first = await deadLetterPayment(orderId, eventId);
@@ -285,6 +297,59 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
       expect((await inboundRow(duplicate)).status).toBe(DeadLetterStatus.RESOLVED);
     });
     expect(await dataSource.getRepository(ProcessedEventEntity).countBy({ eventId })).toBe(1);
+  });
+
+  it('should keep retrying a stock message for an unknown order and resolve it once the order exists', async () => {
+    const orderId = randomUUID();
+    const eventId = randomUUID();
+    const reservationId = randomUUID();
+    const id = randomUUID();
+    await dataSource.getRepository(ConsumedMessageDeadLetterEntity).insert({
+      id,
+      topic: STOCK_RESERVED_TOPIC,
+      partition: 0,
+      offset: '0',
+      messageKey: null,
+      rawValue: JSON.stringify({
+        eventId,
+        aggregateId: reservationId,
+        occurredAt: new Date().toISOString(),
+        version: 1,
+        orderId,
+        items: [{ productId: 'p-2', quantity: 2 }],
+        reservedAt: new Date().toISOString(),
+      }),
+      eventId,
+      orderId,
+      failureType: ConsumedMessageFailureType.RETRIES_EXHAUSTED,
+      error: 'no order found when the message was consumed',
+      attempts: 5,
+    });
+
+    // The order does not exist yet: the retry fails and the row stays due for a later retry.
+    await waitFor(async () => {
+      const row = await inboundRow(id);
+      expect(row.retryCount).toBeGreaterThanOrEqual(1);
+      expect(row.status).toBe(DeadLetterStatus.PENDING_RETRY);
+      expect(row.lastError).toContain(orderId);
+    });
+
+    await dataSource.query(
+      `INSERT INTO orders ("id", "customerId", "status", "totalAmount") VALUES ($1, $2, 'PENDING', 10)`,
+      [orderId, CUSTOMER_ID],
+    );
+
+    await waitFor(async () => {
+      expect((await inboundRow(id)).status).toBe(DeadLetterStatus.RESOLVED);
+    });
+    const order = await dataSource.getRepository(OrderEntity).findOneByOrFail({ id: orderId });
+    expect(order.status).toBe(OrderStatus.PENDING);
+    expect(order.stockOutcome).toBe(StockOutcome.RESERVED);
+    const processed = await dataSource.getRepository(ProcessedEventEntity).findOneByOrFail({
+      eventId,
+    });
+    expect(processed.reservationId).toBe(reservationId);
+    expect(processed.paymentId).toBeNull();
   });
 
   it('should retry a message that keeps failing with growing delays and exhaust it after the maximum retries', async () => {
@@ -309,6 +374,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
       moduleRef.get(ConsumedMessageDeadLetterRepository),
       moduleRef.get(OrderEventsProducer),
       moduleRef.get(PaymentEventsConsumer),
+      moduleRef.get(InventoryEventsConsumer),
       moduleRef.get(OrderProjectionConsumer),
     );
     const rows = Array.from({ length: 4 }, () => {

@@ -8,7 +8,9 @@
 **Consumer in this service**: `PaymentEventsConsumer` (`src/infra/kafka/payment-events.consumer.ts`),
 consumer group `KAFKA_GROUP_ID` (default `ecommerce-orders-consumer`). Introduced by US-04.
 
-**Meaning**: the payment for an order succeeded. Orders confirms the order (saga step 3 in
+**Meaning**: the payment for an order succeeded. Since US-09 Orders records the payment outcome
+and confirms the order only once the stock has also been reserved
+([ADR 0006](../adr/0006-order-joins-payment-and-stock-outcomes.md), extending
 [ADR 0003](../adr/0003-saga-by-choreography.md)).
 
 ## Payload
@@ -32,25 +34,32 @@ consumer group `KAFKA_GROUP_ID` (default `ecommerce-orders-consumer`). Introduce
 | `occurredAt` | ISO 8601 | no | Not used. |
 | `aggregateId` | UUID | yes | **The payment id.** Logged and stored as `paymentId`. **Never used as an order id.** |
 | `version` | integer | yes, must be `1` | Any other value means the message is malformed. |
-| `orderId` | UUID | yes | **The order to confirm.** |
+| `orderId` | UUID | yes | **The order whose payment succeeded.** |
 | `amount`, `currency`, `processedAt` | | no | Not used. |
 
 Unknown extra fields are ignored. The message key (set by Payments to the payment id) is not used.
 
 ## What Orders does
 
-| Order status (looked up by `orderId`) | Effect | Event published |
-|---|---|---|
-| `PENDING` | → `CONFIRMED`, through the same write flow as `POST /orders/:id/confirm` | exactly one `OrderConfirmed` |
-| `CONFIRMED` | nothing (`IGNORED_ALREADY_CONFIRMED`) | none |
-| `CANCELLED` | nothing, plus a warning log (`IGNORED_CONFLICT`); any refund is a Payments concern | none |
-| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) and retried later by the dead-letter worker | none |
+| Order (looked up by `orderId`) | Effect | Event published | `processed_events.outcome` |
+|---|---|---|---|
+| `PENDING`, stock pending | payment outcome → `PROCESSED`, order stays `PENDING` | none | `RECORDED` |
+| `PENDING`, stock reserved | payment outcome → `PROCESSED`, order → `CONFIRMED` | exactly one `OrderConfirmed` | `CONFIRMED` |
+| `PENDING`, payment already processed | nothing | none | `IGNORED_DUPLICATE` |
+| `CONFIRMED` | nothing, informational log | none | `IGNORED_ALREADY_CONFIRMED` |
+| `CANCELLED` | nothing, plus a **warning** starting `payment needs refund:`; the refund itself is a Payments concern | none | `IGNORED_CONFLICT` |
+| no such order | retried with backoff, then dead-lettered (`RETRIES_EXHAUSTED`) and retried later by the dead-letter worker | none | — |
+
+The rules live in the `Order` aggregate (`recordPaymentProcessed()`); the consumer only parses,
+dispatches `ApplyPaymentOutcomeCommand` and commits.
 
 ## Delivery guarantees
 
 - **Idempotent**: a message whose `eventId` is already in `processed_events` is acknowledged with
-  no effect. For a state change, the status update and the `processed_events` row are saved in
-  one transaction, and the update only applies while the order is still `PENDING`.
+  no effect. For a state change, the order update and the `processed_events` row are saved in
+  one transaction, and the update only applies while the order is still `PENDING` with the
+  outcomes it was loaded with (so concurrent payment and stock outcomes cannot both miss the
+  confirmation).
 - **Offsets** are committed only after the outcome has been saved (state change, no-op record or
   dead-letter row).
 - **Malformed** messages (not JSON; `eventId`, `orderId` or `aggregateId` missing or not a UUID;

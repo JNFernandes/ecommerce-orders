@@ -36,7 +36,8 @@ import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/cons
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
-import { ReactToPaymentOutcomeService } from '../../src/services/react-to-payment-outcome.service';
+import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
+import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
 
 jest.setTimeout(300_000);
@@ -135,7 +136,8 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
         PlaceOrderService,
         ConfirmOrderService,
         CancelOrderService,
-        ReactToPaymentOutcomeService,
+        OutcomeWriteFlow,
+        ApplyPaymentOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
@@ -203,6 +205,13 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
     return response.body.orderId;
   }
 
+  /** Stands in for Inventory: marks the order's stock as reserved (US-09 join). */
+  async function reserveStock(orderId: string): Promise<void> {
+    await dataSource.query(`UPDATE orders SET "stockOutcome" = 'RESERVED' WHERE id = $1`, [
+      orderId,
+    ]);
+  }
+
   async function orderRow(
     orderId: string,
   ): Promise<{ status: string; cancellationReason: string | null }> {
@@ -234,8 +243,28 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
     });
   }
 
-  it('should confirm the order and emit exactly one OrderConfirmed when payment is processed', async () => {
+  it('should keep the order PENDING and emit nothing when the payment is processed but the stock is pending', async () => {
     const orderId = await placeOrder();
+    const message = paymentProcessed(orderId);
+    const { eventId } = JSON.parse(message) as { eventId: string };
+
+    await publish(PAYMENT_PROCESSED_TOPIC, message);
+
+    await waitFor(async () => {
+      const rows = await dataSource.query(
+        'SELECT outcome FROM processed_events WHERE "eventId" = $1',
+        [eventId],
+      );
+      expect(rows).toEqual([{ outcome: 'RECORDED' }]);
+    });
+    expect((await orderRow(orderId)).status).toBe('PENDING');
+    await sleep(1_500);
+    expect(eventsFor(ORDER_CONFIRMED_TOPIC, orderId)).toHaveLength(0);
+  });
+
+  it('should confirm the order and emit exactly one OrderConfirmed when payment is processed after the stock was reserved', async () => {
+    const orderId = await placeOrder();
+    await reserveStock(orderId);
 
     await publish(PAYMENT_PROCESSED_TOPIC, paymentProcessed(orderId));
 
@@ -267,7 +296,10 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
     );
 
     await waitFor(async () => {
-      expect(await orderRow(orderId)).toEqual({ status: 'CANCELLED', cancellationReason: reason });
+      expect(await orderRow(orderId)).toEqual({
+        status: 'CANCELLED',
+        cancellationReason: `payment failed: ${reason}`,
+      });
     });
     await waitFor(() => {
       expect(eventsFor(ORDER_CANCELLED_TOPIC, orderId)).toHaveLength(1);
@@ -275,11 +307,12 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
     await sleep(1_500);
     const cancelled = eventsFor(ORDER_CANCELLED_TOPIC, orderId);
     expect(cancelled).toHaveLength(1);
-    expect(cancelled[0].reason).toBe(reason);
+    expect(cancelled[0].reason).toBe(`payment failed: ${reason}`);
   });
 
   it('should change nothing when the same payment event is replayed', async () => {
     const orderId = await placeOrder();
+    await reserveStock(orderId);
     const message = paymentProcessed(orderId);
     const { eventId } = JSON.parse(message) as { eventId: string };
 
@@ -304,6 +337,7 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
 
   it('should dead-letter a malformed message and keep processing the next one', async () => {
     const orderId = await placeOrder();
+    await reserveStock(orderId);
 
     await publish(PAYMENT_PROCESSED_TOPIC, 'not json');
     await publish(PAYMENT_PROCESSED_TOPIC, paymentProcessed(orderId));

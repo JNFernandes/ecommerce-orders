@@ -6,9 +6,13 @@
 this event.
 
 **Emitted when**: A `PENDING` order has been successfully confirmed and the status change is
-durably saved to the write database (PostgreSQL). Never emitted before the save succeeds (see
+durably saved to the write database (PostgreSQL). Since US-09 that happens when the second of the
+two positive outcomes arrives — `payments.payment-processed` **and** `inventory.stock-reserved`,
+in either order ([ADR 0006](../adr/0006-order-joins-payment-and-stock-outcomes.md)) — or through
+`POST /orders/:orderId/confirm`, an operator override that does not wait for the outcomes. Never emitted before the save succeeds (see
 Constitution Principle III / VII), and never emitted at all if the order wasn't `PENDING`
-(confirmation is rejected with `409 Conflict` before any DB write is attempted).
+(the REST endpoint rejects with `409 Conflict` before any DB write; the consumers record an
+ignored outcome).
 
 ## Payload
 
@@ -48,5 +52,6 @@ to other systems is delayed.
 - **Other services** (for example Notifications) may consume this topic. Their contracts are out
   of scope here.
 
-Since US-04, this event is also emitted when a `payments.payment-processed` event confirms the
-order (see [payment-processed.md](payment-processed.md)), with the same payload.
+Since US-09 a processed payment alone no longer emits this event: it is recorded, and the order
+is confirmed (with the same payload) once the stock is reserved as well (see
+[payment-processed.md](payment-processed.md) and [stock-reserved.md](stock-reserved.md)).

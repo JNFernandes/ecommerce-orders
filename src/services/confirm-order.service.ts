@@ -6,7 +6,6 @@ import { OrderRepository } from '../repositories/order.repository';
 import { OrderDeadLetterRepository } from '../repositories/order-dead-letter.repository';
 import { ORDER_CONFIRMED_TOPIC, OrderEventsProducer } from '../infra/kafka/order-events.producer';
 import { ConfirmOrderCommand } from '../commands/confirm-order.command';
-import { ProcessedEventOutcome } from '../infra/database/entities/processed-event.entity';
 
 export interface ConfirmOrderResult {
   orderId: string;
@@ -14,8 +13,8 @@ export interface ConfirmOrderResult {
 }
 
 /**
- * Application-layer service that orchestrates confirming an order (e.g. after payment has
- * been processed): loads it, delegates the PENDING-only business rule to Order.confirm(),
+ * Application-layer service that orchestrates confirming an order manually through REST (an
+ * operator override that does not wait for the payment and stock outcomes): loads it, delegates the PENDING-only business rule to Order.confirm(),
  * persists the status change, and — only after that save succeeds — publishes
  * OrderConfirmed to Kafka. A Kafka publish failure is captured to the dead-letter table
  * and never turns into a client-visible error, since the confirmation itself already
@@ -43,15 +42,7 @@ export class ConfirmOrderService implements ICommandHandler<
     order.confirm();
     const [orderConfirmedEvent] = order.pullDomainEvents() as [OrderConfirmed];
 
-    if (command.inboundEvent) {
-      await this.orderRepository.applyInboundStatusChange(
-        order,
-        command.inboundEvent,
-        ProcessedEventOutcome.CONFIRMED,
-      );
-    } else {
-      await this.orderRepository.updateStatus(order.id, order.status, order.updatedAt);
-    }
+    await this.orderRepository.updateStatus(order.id, order.status, order.updatedAt);
 
     try {
       await this.orderEventsProducer.publishOrderConfirmed(orderConfirmedEvent);

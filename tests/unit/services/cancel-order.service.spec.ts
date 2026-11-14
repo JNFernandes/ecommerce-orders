@@ -7,10 +7,7 @@ import { OrderCancellationError } from '../../../src/domain/order-cancellation.e
 import { OrderRepository } from '../../../src/repositories/order.repository';
 import { OrderEventsProducer } from '../../../src/infra/kafka/order-events.producer';
 import { OrderDeadLetterRepository } from '../../../src/repositories/order-dead-letter.repository';
-import { InboundEventRef } from '../../../src/commands/inbound-event-ref';
 import { OrderCancelled } from '../../../src/domain/events/order-cancelled.event';
-import { ProcessedEventOutcome } from '../../../src/infra/database/entities/processed-event.entity';
-import { OrderStatusChangedConcurrentlyError } from '../../../src/repositories/errors/order-status-changed-concurrently.error';
 
 const CUSTOMER_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
 
@@ -24,7 +21,6 @@ function buildPendingOrder(): Order {
 function buildService(overrides?: {
   order?: Order | null;
   updateStatusError?: Error;
-  applyInboundError?: Error;
   publishError?: Error;
 }): {
   service: CancelOrderService;
@@ -38,9 +34,6 @@ function buildService(overrides?: {
     findById: jest.fn().mockResolvedValue(order),
     updateStatus: overrides?.updateStatusError
       ? jest.fn().mockRejectedValue(overrides.updateStatusError)
-      : jest.fn().mockResolvedValue(undefined),
-    applyInboundStatusChange: overrides?.applyInboundError
-      ? jest.fn().mockRejectedValue(overrides.applyInboundError)
       : jest.fn().mockResolvedValue(undefined),
   } as unknown as OrderRepository;
 
@@ -127,67 +120,6 @@ describe('CancelOrderService', () => {
 
     expect(result.status).toBe(OrderStatus.CANCELLED);
     expect(orderDeadLetterRepository.recordFailure).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('CancelOrderService (inbound payment-failed event)', () => {
-  const reason = 'Amount 15000.00 USD exceeds the maximum allowed threshold of 10000.00 USD.';
-  const inboundEvent: InboundEventRef = {
-    eventId: '9b2e4f1a-8c3d-4e5f-a6b7-c8d9e0f1a2b3',
-    topic: 'payments.payment-failed',
-    orderId: 'b3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
-    paymentId: '1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d',
-  };
-
-  it('should cancel with the reason, save it with the processed event, then publish it', async () => {
-    const { service, orderRepository, orderEventsProducer } = buildService();
-    const callOrder: string[] = [];
-    (orderRepository.applyInboundStatusChange as jest.Mock).mockImplementation(async () => {
-      callOrder.push('applyInboundStatusChange');
-    });
-    (orderEventsProducer.publishOrderCancelled as jest.Mock).mockImplementation(async () => {
-      callOrder.push('publish');
-    });
-
-    const result = await service.execute(
-      new CancelOrderCommand(inboundEvent.orderId, { reason, inboundEvent }),
-    );
-
-    expect(result.status).toBe(OrderStatus.CANCELLED);
-    expect(callOrder).toEqual(['applyInboundStatusChange', 'publish']);
-    expect(orderRepository.applyInboundStatusChange).toHaveBeenCalledWith(
-      expect.objectContaining({ status: OrderStatus.CANCELLED, cancellationReason: reason }),
-      inboundEvent,
-      ProcessedEventOutcome.CANCELLED,
-    );
-    expect(orderRepository.updateStatus).not.toHaveBeenCalled();
-    const published = (orderEventsProducer.publishOrderCancelled as jest.Mock).mock
-      .calls[0][0] as OrderCancelled;
-    expect(published.reason).toBe(reason);
-  });
-
-  it('should store the event in the dead-letter table if Kafka publish fails, and still succeed', async () => {
-    const { service, orderDeadLetterRepository } = buildService({
-      publishError: new Error('kafka unreachable'),
-    });
-
-    const result = await service.execute(
-      new CancelOrderCommand(inboundEvent.orderId, { reason, inboundEvent }),
-    );
-
-    expect(result.status).toBe(OrderStatus.CANCELLED);
-    expect(orderDeadLetterRepository.recordFailure).toHaveBeenCalledTimes(1);
-  });
-
-  it('should propagate OrderStatusChangedConcurrentlyError and NOT publish', async () => {
-    const { service, orderEventsProducer } = buildService({
-      applyInboundError: new OrderStatusChangedConcurrentlyError(inboundEvent.orderId),
-    });
-
-    await expect(
-      service.execute(new CancelOrderCommand(inboundEvent.orderId, { reason, inboundEvent })),
-    ).rejects.toThrow(OrderStatusChangedConcurrentlyError);
-    expect(orderEventsProducer.publishOrderCancelled).not.toHaveBeenCalled();
   });
 
   it('should publish OrderCancelled without a reason for a REST cancellation', async () => {

@@ -20,6 +20,7 @@ const KAFKA_CONFIG: KafkaConfig = {
   clientId: 'test',
   groupId: 'payments-group',
   projectionGroupId: 'projection-group',
+  inventoryGroupId: 'test-inventory-group',
   consumerEnabled: true,
   maxAttempts: 3,
   backoffInitialMs: 1,

@@ -2,9 +2,9 @@ import { randomUUID } from 'crypto';
 import { Order } from '../order.aggregate';
 
 /**
- * Domain event raised by Order.confirm() once a pending order has been confirmed, and
- * published to Kafka topic `orders.order-confirmed` only after the status change is
- * durably saved.
+ * Domain event raised once a pending order has been confirmed — by Order.confirm() (REST) or by
+ * the second positive outcome (`Order.recordPaymentProcessed()` / `Order.recordStockReserved()`)
+ * — and published to Kafka topic `orders.order-confirmed` only after the change is durably saved.
  */
 export class OrderConfirmed {
   private constructor(

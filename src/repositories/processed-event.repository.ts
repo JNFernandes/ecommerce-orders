@@ -6,8 +6,10 @@ import {
   ProcessedEventEntity,
   ProcessedEventOutcome,
 } from '../infra/database/entities/processed-event.entity';
-import { EventAlreadyProcessedError } from '../services/errors/payment-outcome.errors';
+import { EventAlreadyProcessedError } from '../services/errors/outcome.errors';
 import { isUniqueViolation } from './errors/is-unique-violation';
+import { OutcomeRecord } from '../domain/outcome-application';
+import { toProcessedEventOutcome } from './processed-event-outcome.mapping';
 
 /** Idempotency store for consumed events, keyed by `eventId`. */
 @Injectable()
@@ -34,7 +36,8 @@ export class ProcessedEventRepository {
         eventId: ref.eventId,
         topic: ref.topic,
         orderId: ref.orderId,
-        paymentId: ref.paymentId,
+        paymentId: ref.paymentId ?? null,
+        reservationId: ref.reservationId ?? null,
         outcome,
       });
     } catch (error) {
@@ -43,5 +46,15 @@ export class ProcessedEventRepository {
       }
       throw error;
     }
+  }
+
+  /**
+   * Records that the event was ignored by the domain (`IGNORED_*` record): nothing on the order
+   * changed. State changes are recorded inside OrderRepository.applyOutcome's transaction.
+   *
+   * @throws EventAlreadyProcessedError if the `eventId` is already recorded.
+   */
+  async recordIgnoredOutcome(ref: InboundEventRef, record: OutcomeRecord): Promise<void> {
+    await this.recordOutcome(ref, toProcessedEventOutcome(record));
   }
 }

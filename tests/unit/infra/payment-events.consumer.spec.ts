@@ -5,11 +5,11 @@ import { ConfigService } from '@nestjs/config';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
 import { PaymentEventsConsumer } from '../../../src/infra/kafka/payment-events.consumer';
 import { PAYMENT_PROCESSED_TOPIC } from '../../../src/infra/kafka/payment-message.parser';
-import { ReactToPaymentOutcomeCommand } from '../../../src/commands/react-to-payment-outcome.command';
+import { ApplyPaymentOutcomeCommand } from '../../../src/commands/apply-payment-outcome.command';
 import { PaymentOutcome } from '../../../src/domain/payment-outcome.enum';
 import { KafkaConfig } from '../../../src/config/configuration';
 import { ConsumedMessageDeadLetterRepository } from '../../../src/repositories/consumed-message-dead-letter.repository';
-import { OrderNotFoundForPaymentError } from '../../../src/services/errors/payment-outcome.errors';
+import { OrderNotFoundForOutcomeError } from '../../../src/services/errors/outcome.errors';
 
 const EVENT_ID = '9b2e4f1a-8c3d-4e5f-a6b7-c8d9e0f1a2b3';
 const PAYMENT_ID = '1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d';
@@ -20,6 +20,7 @@ const KAFKA_CONFIG: KafkaConfig = {
   clientId: 'test',
   groupId: 'test-group',
   projectionGroupId: 'test-projection-group',
+  inventoryGroupId: 'test-inventory-group',
   consumerEnabled: true,
   maxAttempts: 3,
   backoffInitialMs: 1,
@@ -102,7 +103,7 @@ describe('PaymentEventsConsumer.handleMessage', () => {
   });
 
   describe('valid messages', () => {
-    it('should dispatch ReactToPaymentOutcomeCommand and then commit offset + 1', async () => {
+    it('should dispatch ApplyPaymentOutcomeCommand and then commit offset + 1', async () => {
       const callOrder: string[] = [];
       const dispatch = jest.fn().mockImplementation(async () => {
         callOrder.push('dispatch');
@@ -115,7 +116,7 @@ describe('PaymentEventsConsumer.handleMessage', () => {
       await consumer.handleMessage(payloadFor(processedValue()));
 
       expect(dispatch).toHaveBeenCalledWith(
-        new ReactToPaymentOutcomeCommand(PaymentOutcome.PROCESSED, {
+        new ApplyPaymentOutcomeCommand(PaymentOutcome.PROCESSED, {
           eventId: EVENT_ID,
           topic: PAYMENT_PROCESSED_TOPIC,
           orderId: ORDER_ID,
@@ -132,7 +133,7 @@ describe('PaymentEventsConsumer.handleMessage', () => {
 
       await consumer.handleMessage(payloadFor(processedValue()));
 
-      const command = dispatch.mock.calls[0][0] as ReactToPaymentOutcomeCommand;
+      const command = dispatch.mock.calls[0][0] as ApplyPaymentOutcomeCommand;
       expect(command.inboundEvent.orderId).toBe(ORDER_ID);
       expect(command.inboundEvent.paymentId).toBe(PAYMENT_ID);
     });
@@ -190,7 +191,11 @@ describe('PaymentEventsConsumer.handleMessage', () => {
     });
 
     it('should dead-letter after maxAttempts failures and then commit', async () => {
-      const notFound = new OrderNotFoundForPaymentError(ORDER_ID, PAYMENT_ID);
+      const notFound = new OrderNotFoundForOutcomeError(
+        ORDER_ID,
+        PAYMENT_PROCESSED_TOPIC,
+        PAYMENT_ID,
+      );
       const dispatch = jest.fn().mockRejectedValue(notFound);
       const { consumer, kafkaConsumer, deadLetters } = buildConsumer(dispatch);
 
@@ -258,7 +263,7 @@ describe('PaymentEventsConsumer.process (dead-letter retry entry point)', () => 
     await consumer.process(PAYMENT_PROCESSED_TOPIC, processedValue());
 
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch.mock.calls[0][0]).toBeInstanceOf(ReactToPaymentOutcomeCommand);
+    expect(dispatch.mock.calls[0][0]).toBeInstanceOf(ApplyPaymentOutcomeCommand);
     expect(kafkaConsumer.commitOffsets).not.toHaveBeenCalled();
     expect(deadLetters.recordMalformed).not.toHaveBeenCalled();
     expect(deadLetters.recordRetriesExhausted).not.toHaveBeenCalled();
@@ -275,11 +280,13 @@ describe('PaymentEventsConsumer.process (dead-letter retry entry point)', () => 
   it('should propagate a handler error after a single attempt', async () => {
     const dispatch = jest
       .fn()
-      .mockRejectedValue(new OrderNotFoundForPaymentError(ORDER_ID, PAYMENT_ID));
+      .mockRejectedValue(
+        new OrderNotFoundForOutcomeError(ORDER_ID, PAYMENT_PROCESSED_TOPIC, PAYMENT_ID),
+      );
     const { consumer } = buildConsumer(dispatch);
 
     await expect(consumer.process(PAYMENT_PROCESSED_TOPIC, processedValue())).rejects.toThrow(
-      OrderNotFoundForPaymentError,
+      OrderNotFoundForOutcomeError,
     );
     expect(dispatch).toHaveBeenCalledTimes(1);
   });

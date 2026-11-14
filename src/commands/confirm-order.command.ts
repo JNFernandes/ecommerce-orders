@@ -1,13 +1,9 @@
-import { InboundEventRef } from './inbound-event-ref';
-
 /**
- * Command to confirm a pending order. Dispatched by OrdersController (REST) or by
- * ReactToPaymentOutcomeService when a payment succeeds — in the latter case `inboundEvent`
- * identifies the consumed event, which is recorded as processed atomically with the change.
+ * Command to confirm a pending order manually, dispatched by OrdersController (REST). An
+ * operator override: it confirms any PENDING order whatever its payment and stock outcomes
+ * (US-09, FR-020). Outcome-driven confirmation goes through ApplyPaymentOutcomeCommand /
+ * ApplyStockOutcomeCommand instead.
  */
 export class ConfirmOrderCommand {
-  constructor(
-    public readonly orderId: string,
-    public readonly inboundEvent?: InboundEventRef,
-  ) {}
+  constructor(public readonly orderId: string) {}
 }

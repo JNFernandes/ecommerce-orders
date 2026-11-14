@@ -7,6 +7,9 @@ import { OrderConfirmed } from './events/order-confirmed.event';
 import { OrderValidationError } from './order-validation.error';
 import { OrderCancellationError } from './order-cancellation.error';
 import { OrderConfirmationError } from './order-confirmation.error';
+import { PaymentOutcome } from './payment-outcome.enum';
+import { StockOutcome } from './stock-outcome.enum';
+import { Attention, OutcomeApplication, OutcomeRecord } from './outcome-application';
 
 export interface RawOrderItem {
   productId: string;
@@ -32,8 +35,15 @@ export class Order {
     public readonly totalAmount: number,
     public readonly createdAt: Date,
     public updatedAt: Date,
-    /** Why the order was cancelled, when a reason was given (payment failure); otherwise null. */
+    /**
+     * Why the order was cancelled, when a reason was given (payment failure or stock
+     * rejection); otherwise null.
+     */
     public cancellationReason: string | null = null,
+    /** The payment outcome received so far (`PENDING` until Payments announces one). */
+    public paymentOutcome: PaymentOutcome = PaymentOutcome.PENDING,
+    /** The stock outcome received so far (`PENDING` until Inventory announces one). */
+    public stockOutcome: StockOutcome = StockOutcome.PENDING,
   ) {}
 
   /**
@@ -93,9 +103,84 @@ export class Order {
       );
     }
 
+    this.markCancelled(reason ?? null);
+  }
+
+  /**
+   * Records that the payment for this order failed (`payments.payment-failed`). On a PENDING
+   * order whose payment outcome is still pending it cancels the order at once, whatever the
+   * stock outcome, with the reason `payment failed: <reason>`. A failure after the payment was
+   * already processed contradicts it: the first payment outcome wins and this one is ignored
+   * as a conflict. Never throws.
+   *
+   * @param reason The failure reason announced by Payments; may be empty.
+   */
+  recordPaymentFailed(reason?: string): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: false, paymentProcessed: false });
+    }
+    if (this.paymentOutcome === PaymentOutcome.PROCESSED) {
+      return { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
+    }
+
+    this.paymentOutcome = PaymentOutcome.FAILED;
+    this.markCancelled(Order.cancellationReasonFor('payment failed', reason));
+    return { record: OutcomeRecord.CANCELLED, attention: Attention.NONE };
+  }
+
+  /**
+   * Records that the stock for this order was rejected (`inventory.stock-rejected`). On a
+   * PENDING order whose stock outcome is still pending it cancels the order at once, whatever
+   * the payment outcome, with the reason `stock rejected: <reason>`. A rejection after the
+   * stock was already reserved contradicts it: the first stock outcome wins and this one is
+   * ignored as a conflict. Never throws.
+   *
+   * @param reason The rejection reason announced by Inventory; may be empty.
+   */
+  recordStockRejected(reason?: string): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: false, paymentProcessed: false });
+    }
+    if (this.stockOutcome === StockOutcome.RESERVED) {
+      return { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
+    }
+
+    this.stockOutcome = StockOutcome.REJECTED;
+    this.markCancelled(Order.cancellationReasonFor('stock rejected', reason));
+    return { record: OutcomeRecord.CANCELLED, attention: Attention.NONE };
+  }
+
+  /**
+   * Classifies an outcome that arrives after the order reached a final status. Nothing changes.
+   * On a CONFIRMED order, a positive outcome agrees with it and a negative one is a conflict.
+   * On a CANCELLED order, a processed payment means the customer was charged for an order that
+   * will not ship (refund needed); every other outcome needs no action.
+   */
+  private ignoreForFinalStatus(outcome: {
+    positive: boolean;
+    paymentProcessed: boolean;
+  }): OutcomeApplication {
+    if (this.status === OrderStatus.CONFIRMED) {
+      return outcome.positive
+        ? { record: OutcomeRecord.IGNORED_ALREADY_CONFIRMED, attention: Attention.NONE }
+        : { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.CONFLICT };
+    }
+    return outcome.paymentProcessed
+      ? { record: OutcomeRecord.IGNORED_CONFLICT, attention: Attention.REFUND_NEEDED }
+      : { record: OutcomeRecord.IGNORED_ALREADY_CANCELLED, attention: Attention.NONE };
+  }
+
+  /** `<prefix>: <reason>`, or the bare prefix when the trimmed reason is empty or missing. */
+  private static cancellationReasonFor(prefix: string, reason?: string): string {
+    const trimmed = reason?.trim() ?? '';
+    return trimmed === '' ? prefix : `${prefix}: ${trimmed}`;
+  }
+
+  /** The PENDING → CANCELLED transition shared by cancel() and the outcome methods. */
+  private markCancelled(reason: string | null): void {
     this.status = OrderStatus.CANCELLED;
     this.updatedAt = new Date();
-    this.cancellationReason = reason ?? null;
+    this.cancellationReason = reason;
     this.domainEvents.push(OrderCancelled.from(this));
   }
 
@@ -111,12 +196,68 @@ export class Order {
       );
     }
 
+    this.markConfirmed();
+  }
+
+  /**
+   * Records that the payment for this order succeeded (`payments.payment-processed`). On a
+   * PENDING order it confirms the order when the stock is already reserved, and otherwise
+   * records the outcome and waits for the stock. Never throws.
+   */
+  recordPaymentProcessed(): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: true, paymentProcessed: true });
+    }
+    if (this.paymentOutcome === PaymentOutcome.PROCESSED) {
+      return { record: OutcomeRecord.IGNORED_DUPLICATE, attention: Attention.NONE };
+    }
+
+    this.paymentOutcome = PaymentOutcome.PROCESSED;
+    return this.confirmIfBothPositive();
+  }
+
+  /**
+   * Records that the stock for this order was reserved (`inventory.stock-reserved`). On a
+   * PENDING order it confirms the order when the payment is already processed, and otherwise
+   * records the outcome and waits for the payment. Never throws.
+   */
+  recordStockReserved(): OutcomeApplication {
+    if (this.status !== OrderStatus.PENDING) {
+      return this.ignoreForFinalStatus({ positive: true, paymentProcessed: false });
+    }
+    if (this.stockOutcome === StockOutcome.RESERVED) {
+      return { record: OutcomeRecord.IGNORED_DUPLICATE, attention: Attention.NONE };
+    }
+
+    this.stockOutcome = StockOutcome.RESERVED;
+    return this.confirmIfBothPositive();
+  }
+
+  /** Confirms the order once both outcomes are positive; otherwise only refreshes updatedAt. */
+  private confirmIfBothPositive(): OutcomeApplication {
+    if (
+      this.paymentOutcome === PaymentOutcome.PROCESSED &&
+      this.stockOutcome === StockOutcome.RESERVED
+    ) {
+      this.markConfirmed();
+      return { record: OutcomeRecord.CONFIRMED, attention: Attention.NONE };
+    }
+
+    this.updatedAt = new Date();
+    return { record: OutcomeRecord.RECORDED, attention: Attention.NONE };
+  }
+
+  /** The PENDING → CONFIRMED transition shared by confirm() and the outcome methods. */
+  private markConfirmed(): void {
     this.status = OrderStatus.CONFIRMED;
     this.updatedAt = new Date();
     this.domainEvents.push(OrderConfirmed.from(this));
   }
 
-  /** Reconstructs an Order from persisted state, without raising domain events. */
+  /**
+   * Reconstructs an Order from persisted state, without raising domain events. The outcomes
+   * default to `PENDING` when not given.
+   */
   static reconstitute(
     id: string,
     customerId: string,
@@ -126,6 +267,8 @@ export class Order {
     createdAt: Date,
     updatedAt: Date,
     cancellationReason: string | null = null,
+    paymentOutcome: PaymentOutcome = PaymentOutcome.PENDING,
+    stockOutcome: StockOutcome = StockOutcome.PENDING,
   ): Order {
     return new Order(
       id,
@@ -136,6 +279,8 @@ export class Order {
       createdAt,
       updatedAt,
       cancellationReason,
+      paymentOutcome,
+      stockOutcome,
     );
   }
 
