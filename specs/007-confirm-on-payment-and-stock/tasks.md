@@ -107,7 +107,7 @@ All [P]: separate files. Keep `docs/events/` consistent with `ecommerce-infra/do
 - [X] T026 [P] [US2] Update `docs/events/order-cancelled.md` (reason values per `contracts/event-order-cancelled-delta.md`), `docs/events/order-confirmed.md` (published when both outcomes are positive or manually), `docs/events/payment-processed.md` (records the payment; confirms only with stock reserved) and `docs/events/payment-failed.md` (reason prefix). **Gate.**
 - [X] T027 [P] [US1] Update `README.md`: "Order lifecycle" status line (built, no longer "planned"), the two `inventory.*` rows → `Built`, rename "Payment outcome consumer" to cover both consumers, the env table (`KAFKA_INVENTORY_GROUP_ID`; `KAFKA_CONSUMER_ENABLED` now starts three consumers), the `docs/events/` mentions. **Gate.**
 - [X] T028 [P] Update `src/README.md` (commands, services, domain rows: `record*()`, `OutcomeWriteFlow`, `Apply*OutcomeService`, `InventoryEventsConsumer`, `stock-message.parser`; remove `decidePaymentReaction` / `ReactToPaymentOutcome*`) and `CLAUDE.md` (Event contracts: stock topics built, consumer file, group env var, remove "Until the stock consumer lands…"). **Gate.**
-- [ ] T029 [P] Update `docs/adr/0006-order-joins-payment-and-stock-outcomes.md`: replace the open "decide the fate of the manual endpoint" consequence with the decision (operator override, spec FR-020) and note the concurrency guard (research R1). **Gate.**
+- [X] T029 [P] Update `docs/adr/0006-order-joins-payment-and-stock-outcomes.md`: replace the open "decide the fate of the manual endpoint" consequence with the decision (operator override, spec FR-020) and note the concurrency guard (research R1). **Gate.**
 
 ---
 
