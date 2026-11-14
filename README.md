@@ -11,10 +11,15 @@ An order is placed `PENDING` and waits for two outcomes, which may arrive in eit
 
 - **Confirmed** only when the payment is processed **and** the stock is reserved.
 - **Cancelled** as soon as the payment fails **or** the stock is rejected.
-- An outcome for an order that is no longer `PENDING` is ignored and logged.
+- An outcome for an order that is no longer `PENDING` is ignored and logged; a payment that
+  succeeds for an already cancelled order is logged as a warning (`payment needs refund: …`).
+- A second, contradicting outcome on the same side (payment failed after payment processed, stock
+  rejected after stock reserved) is ignored with a warning: the first outcome of each side wins.
+- `POST /orders/:orderId/confirm` stays an operator override that confirms a `PENDING` order
+  without waiting for the outcomes.
 
-The join is decided in the Domain layer. **Status:** the stock consumer is planned; until it
-lands, the service still confirms on `payments.payment-processed` alone.
+The join is decided in the Domain layer (`Order.recordPayment*()` / `Order.recordStock*()`).
+**Status:** built (US-09).
 
 Built with NestJS and TypeScript, following DDD and CQRS. The rules this codebase must follow are
 in the [project constitution](.specify/memory/constitution.md).
@@ -43,9 +48,11 @@ See [`src/README.md`](src/README.md) for the folder layout.
 - **Dead-letter retry (built, US-08)**: failed publishes and unprocessable consumed messages are
   retried automatically with capped exponential backoff, safely across instances, until they
   resolve or are marked `EXHAUSTED`. See [docs/dead-letter-retry.md](docs/dead-letter-retry.md).
-- **Payment outcomes (built, US-04)**: a Kafka consumer reacts to `payments.payment-processed`
-  and `payments.payment-failed` by dispatching the same Confirm/Cancel commands, so an order
-  reaches `CONFIRMED` or `CANCELLED` with no manual call.
+- **Payment and stock outcomes (built, US-04 and US-09)**: two Kafka consumers react to
+  `payments.payment-processed` / `payments.payment-failed` and `inventory.stock-reserved` /
+  `inventory.stock-rejected` by dispatching `ApplyPaymentOutcomeCommand` /
+  `ApplyStockOutcomeCommand`. The `Order` aggregate joins the two outcomes, so an order reaches
+  `CONFIRMED` (both positive) or `CANCELLED` (first negative) with no manual call.
 - **Read model (built, US-05)**: a projection consumes this service's own `orders.*` events and
   keeps one MongoDB document per order in `order_views` (see [docs/read-model.md](docs/read-model.md)).
 - **Read path (built, US-06)**: GraphQL `orders` query → query bus → `ListOrdersService` →
@@ -61,10 +68,10 @@ See [`src/README.md`](src/README.md) for the folder layout.
 | `OrderPlaced` | `orders.order-placed` | Produced | Built |
 | `OrderConfirmed` | `orders.order-confirmed` | Produced | Built |
 | `OrderCancelled` | `orders.order-cancelled` | Produced | Built |
-| `PaymentProcessed` | `payments.payment-processed` | Consumed: confirms the order | Built |
+| `PaymentProcessed` | `payments.payment-processed` | Consumed: confirms the order once the stock is also reserved | Built |
 | `PaymentFailed` | `payments.payment-failed` | Consumed: cancels the order, stores the reason | Built |
-| `StockReserved` | `inventory.stock-reserved` | Consumed: confirms the order once the payment is also processed | Planned |
-| `StockRejected` | `inventory.stock-rejected` | Consumed: cancels the order, stores the reason | Planned |
+| `StockReserved` | `inventory.stock-reserved` | Consumed: confirms the order once the payment is also processed | Built |
+| `StockRejected` | `inventory.stock-rejected` | Consumed: cancels the order, stores the reason | Built |
 | `orders.*` (own events) | `orders.*` | Consumed: builds the read model (`order_views`) | Built |
 
 Every event carries `eventId`, `occurredAt`, `aggregateId` and `version`. Payment and Inventory
@@ -75,18 +82,24 @@ payment and stock outcomes ([ADR 0006](docs/adr/0006-order-joins-payment-and-sto
 Payload details are in [`docs/events/`](docs/events/) and must stay consistent with the
 platform contract in `ecommerce-infra/docs/events.md`.
 
-### Payment outcome consumer
+### Payment and inventory outcome consumers
 
-- Consumer group `KAFKA_GROUP_ID`. The order is looked up by the payment event's `orderId`.
-- Idempotent: each handled `eventId` is stored in `processed_events`, in the same transaction as
-  the status change, and a redelivery changes nothing.
+- `PaymentEventsConsumer` (group `KAFKA_GROUP_ID`) and `InventoryEventsConsumer` (group
+  `KAFKA_INVENTORY_GROUP_ID`). The order is looked up by the event's `orderId`, never by its
+  `aggregateId` (the payment or reservation id).
+- Idempotent: each handled `eventId` is stored in `processed_events` (with its `paymentId` or
+  `reservationId`), in the same transaction as the order change, and a redelivery changes
+  nothing. The change only applies while the order is still `PENDING` with the outcomes it was
+  loaded with, so a payment and a stock outcome handled at the same time cannot both miss the
+  confirmation (the loser is retried and sees the other outcome).
 - The offset is committed only after the outcome is saved. Malformed messages are dead-lettered
   immediately. Other failures (for example an unknown `orderId`) are retried with exponential
   backoff and then dead-lettered to `consumed_message_dead_letters`, from where the dead-letter
   worker retries them later (malformed ones are stored `EXHAUSTED` and never retried).
-- `OrderCancelled` carries an optional `reason` when the cancellation came from a failed payment.
-- Set `KAFKA_CONSUMER_ENABLED=false` to run the HTTP API without the consumers (payment and
-  read-model projection).
+- `OrderCancelled` carries an optional `reason` for outcome-driven cancellations:
+  `payment failed: <reason>` or `stock rejected: <reason>`.
+- Set `KAFKA_CONSUMER_ENABLED=false` to run the HTTP API without the consumers (payment,
+  inventory and read-model projection).
 
 ## Endpoints
 
@@ -234,9 +247,10 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 | `KAFKA_PRODUCER_RETRIES` | `1` | Producer connect/publish retries before the event is dead-lettered (bounds a failed publish to about 3 s) |
 | `KAFKA_GROUP_ID` | `ecommerce-orders-consumer` | Consumer group id of the payment events consumer |
 | `KAFKA_PROJECTION_GROUP_ID` | `ecommerce-orders-projection` | Consumer group of the read-model projection |
+| `KAFKA_INVENTORY_GROUP_ID` | `ecommerce-orders-inventory-consumer` | Consumer group of the inventory (stock outcome) events consumer |
 | `MONGO_URI` | `mongodb://mongo_user:mongo_pass@localhost:27017/orders_read?authSource=admin` | Read-model database (MongoDB) |
-| `KAFKA_CONSUMER_ENABLED` | `true` | Start both Kafka consumers (`false` disables them) |
-| `PAYMENT_CONSUMER_MAX_ATTEMPTS` | `5` | Attempts before a failing event is dead-lettered (both consumers) |
+| `KAFKA_CONSUMER_ENABLED` | `true` | Start the three Kafka consumers: payment, inventory, projection (`false` disables them) |
+| `PAYMENT_CONSUMER_MAX_ATTEMPTS` | `5` | Attempts before a failing event is dead-lettered (every consumer) |
 | `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS` | `1000` | First retry delay (doubles each attempt) |
 | `PAYMENT_CONSUMER_BACKOFF_MAX_MS` | `30000` | Maximum retry delay |
 | `DEAD_LETTER_RETRY_ENABLED` | `true` | Run the dead-letter retry worker (`false` disables it) |
@@ -246,7 +260,7 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 | `DEAD_LETTER_MAX_DELAY_MS` | `600000` | Maximum delay between retries |
 | `DEAD_LETTER_MAX_RETRIES` | `8` | Retries before a dead letter is marked `EXHAUSTED` |
 
-MongoDB is connected lazily: the HTTP API and the payment consumer start and keep working while
+MongoDB is connected lazily: the HTTP API and the payment and inventory consumers start and keep working while
 it is down, and the projection catches up once it is back.
 
 **Startup does not require Kafka.** Nothing connects to Kafka during bootstrap:
@@ -265,7 +279,7 @@ it is down, and the projection catches up once it is back.
 ```bash
 npm run test               # all test projects
 npm run test:unit          # domain and handlers in isolation (no Nest, DB or Kafka)
-npm run test:integration   # REST + payment consumer (real PostgreSQL); read model and GraphQL queries (real MongoDB)
+npm run test:integration   # REST + payment and inventory consumers, migrations (real PostgreSQL); read model and GraphQL queries (real MongoDB)
 npm run test:component     # full Nest app (REST → Kafka → projection → GraphQL) on real PostgreSQL, Kafka and MongoDB
 npm run schema:generate    # regenerate docs/schema.gql after GraphQL changes
 npm run test:cov           # with coverage
