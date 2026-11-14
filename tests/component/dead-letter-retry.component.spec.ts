@@ -41,6 +41,8 @@ import { CancelOrderService } from '../../src/services/cancel-order.service';
 import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
 import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.consumer';
+import { InventoryEventsConsumer } from '../../src/infra/kafka/inventory-events.consumer';
+import { ApplyStockOutcomeService } from '../../src/services/apply-stock-outcome.service';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
 import { PAYMENT_PROCESSED_TOPIC } from '../../src/infra/kafka/payment-message.parser';
@@ -152,6 +154,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
         CancelOrderService,
         OutcomeWriteFlow,
         ApplyPaymentOutcomeService,
+        ApplyStockOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
@@ -159,6 +162,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
         ConsumedMessageDeadLetterRepository,
         OrderEventsProducer,
         PaymentEventsConsumer,
+        InventoryEventsConsumer,
         OrderProjectionConsumer,
         // The inbound cases here are payment messages, so MongoDB is not needed: the projection
         // service (a dependency of OrderProjectionConsumer, which the worker routes orders.*
@@ -315,6 +319,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
       moduleRef.get(ConsumedMessageDeadLetterRepository),
       moduleRef.get(OrderEventsProducer),
       moduleRef.get(PaymentEventsConsumer),
+      moduleRef.get(InventoryEventsConsumer),
       moduleRef.get(OrderProjectionConsumer),
     );
     const rows = Array.from({ length: 4 }, () => {

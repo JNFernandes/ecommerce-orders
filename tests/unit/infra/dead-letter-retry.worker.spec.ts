@@ -13,6 +13,7 @@ import {
 } from '../../../src/infra/database/entities/consumed-message-dead-letter.entity';
 import { ConsumedMessageDeadLetterRepository } from '../../../src/repositories/consumed-message-dead-letter.repository';
 import { PaymentEventsConsumer } from '../../../src/infra/kafka/payment-events.consumer';
+import { InventoryEventsConsumer } from '../../../src/infra/kafka/inventory-events.consumer';
 import { OrderProjectionConsumer } from '../../../src/infra/kafka/order-projection.consumer';
 import { MalformedMessageError } from '../../../src/infra/kafka/malformed-message.error';
 
@@ -107,6 +108,7 @@ describe('DeadLetterRetryWorker', () => {
   let inbound: FakeStore<ConsumedMessageDeadLetterEntity>;
   let republish: jest.Mock;
   let paymentProcess: jest.Mock;
+  let inventoryProcess: jest.Mock;
   let projectionProcess: jest.Mock;
   let worker: DeadLetterRetryWorker;
   let clock: Date;
@@ -124,6 +126,10 @@ describe('DeadLetterRetryWorker', () => {
         topics: ['payments.payment-processed', 'payments.payment-failed'],
         process: paymentProcess,
       } as unknown as PaymentEventsConsumer,
+      {
+        topics: ['inventory.stock-reserved', 'inventory.stock-rejected'],
+        process: inventoryProcess,
+      } as unknown as InventoryEventsConsumer,
       {
         topics: ['orders.order-placed', 'orders.order-confirmed', 'orders.order-cancelled'],
         process: projectionProcess,
@@ -143,6 +149,7 @@ describe('DeadLetterRetryWorker', () => {
     inbound = new FakeStore();
     republish = jest.fn().mockResolvedValue(undefined);
     paymentProcess = jest.fn().mockResolvedValue(undefined);
+    inventoryProcess = jest.fn().mockResolvedValue(undefined);
     projectionProcess = jest.fn().mockResolvedValue(undefined);
     worker = build();
   });
@@ -308,6 +315,18 @@ describe('DeadLetterRetryWorker', () => {
       expect(update).toMatchObject({ status: DeadLetterStatus.RESOLVED, retryCount: 1 });
     });
 
+    it('should re-handle an inventory.* row through the inventory consumer and resolve it', async () => {
+      const update = await runOne(inboundRow({ topic: 'inventory.stock-reserved' }));
+
+      expect(inventoryProcess).toHaveBeenCalledWith(
+        'inventory.stock-reserved',
+        Buffer.from('{"eventId":"evt-9"}', 'utf8'),
+      );
+      expect(paymentProcess).not.toHaveBeenCalled();
+      expect(projectionProcess).not.toHaveBeenCalled();
+      expect(update).toMatchObject({ status: DeadLetterStatus.RESOLVED, retryCount: 1 });
+    });
+
     it('should re-handle an orders.* row through the projection consumer', async () => {
       await runOne(inboundRow({ topic: 'orders.order-confirmed' }));
 
@@ -342,12 +361,13 @@ describe('DeadLetterRetryWorker', () => {
     });
 
     it.each([
-      ['an unknown topic', { topic: 'inventory.stock-reserved' }],
+      ['an unknown topic', { topic: 'inventory.stock-released' }],
       ['a null raw value (tombstone)', { rawValue: null }],
     ])('should exhaust %s without handling it', async (_label, overrides) => {
       const update = await runOne(inboundRow(overrides));
 
       expect(paymentProcess).not.toHaveBeenCalled();
+      expect(inventoryProcess).not.toHaveBeenCalled();
       expect(projectionProcess).not.toHaveBeenCalled();
       expect(update.status).toBe(DeadLetterStatus.EXHAUSTED);
     });

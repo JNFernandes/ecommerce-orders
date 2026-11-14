@@ -42,6 +42,8 @@ import { CancelOrderService } from '../../src/services/cancel-order.service';
 import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
 import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.consumer';
+import { InventoryEventsConsumer } from '../../src/infra/kafka/inventory-events.consumer';
+import { ApplyStockOutcomeService } from '../../src/services/apply-stock-outcome.service';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
@@ -211,6 +213,7 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
         CancelOrderService,
         OutcomeWriteFlow,
         ApplyPaymentOutcomeService,
+        ApplyStockOutcomeService,
         OrderRepository,
         OrderDeadLetterRepository,
         CustomerRepository,
@@ -218,6 +221,7 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
         ConsumedMessageDeadLetterRepository,
         OrderEventsProducer,
         PaymentEventsConsumer,
+        InventoryEventsConsumer,
         OrderProjectionConsumer,
         // MongoDB is not part of this scenario: the projection consumer runs against a stub.
         { provide: OrderProjectionService, useValue: { project: jest.fn() } },
