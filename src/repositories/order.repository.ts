@@ -15,7 +15,7 @@ import {
   ProcessedEventOutcome,
 } from '../infra/database/entities/processed-event.entity';
 import { InboundEventRef } from '../commands/inbound-event-ref';
-import { EventAlreadyProcessedError } from '../services/errors/payment-outcome.errors';
+import { EventAlreadyProcessedError } from '../services/errors/outcome.errors';
 import { OrderStatusChangedConcurrentlyError } from './errors/order-status-changed-concurrently.error';
 import { isUniqueViolation } from './errors/is-unique-violation';
 import { toProcessedEventOutcome } from './processed-event-outcome.mapping';

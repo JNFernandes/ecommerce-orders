@@ -8,10 +8,7 @@ import { PaymentReaction, decidePaymentReaction } from '../domain/payment-reacti
 import { ProcessedEventOutcome } from '../infra/database/entities/processed-event.entity';
 import { OrderRepository } from '../repositories/order.repository';
 import { ProcessedEventRepository } from '../repositories/processed-event.repository';
-import {
-  EventAlreadyProcessedError,
-  OrderNotFoundForPaymentError,
-} from './errors/payment-outcome.errors';
+import { EventAlreadyProcessedError, OrderNotFoundForOutcomeError } from './errors/outcome.errors';
 
 /** Result when the event's `eventId` had already been processed (nothing was done). */
 export const ALREADY_PROCESSED = 'ALREADY_PROCESSED';
@@ -67,7 +64,11 @@ export class ReactToPaymentOutcomeService implements ICommandHandler<
 
     const order = await this.orderRepository.findById(inboundEvent.orderId);
     if (!order) {
-      throw new OrderNotFoundForPaymentError(inboundEvent.orderId, inboundEvent.paymentId);
+      throw new OrderNotFoundForOutcomeError(
+        inboundEvent.orderId,
+        inboundEvent.topic,
+        inboundEvent.paymentId,
+      );
     }
 
     const reaction = decidePaymentReaction(order.status, command.outcome);

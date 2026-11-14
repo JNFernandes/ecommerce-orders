@@ -6,7 +6,7 @@ import {
   ProcessedEventEntity,
   ProcessedEventOutcome,
 } from '../infra/database/entities/processed-event.entity';
-import { EventAlreadyProcessedError } from '../services/errors/payment-outcome.errors';
+import { EventAlreadyProcessedError } from '../services/errors/outcome.errors';
 import { isUniqueViolation } from './errors/is-unique-violation';
 
 /** Idempotency store for consumed events, keyed by `eventId`. */

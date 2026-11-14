@@ -33,7 +33,7 @@ import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { ProcessedEventRepository } from '../../src/repositories/processed-event.repository';
 import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
 import { OrderStatusChangedConcurrentlyError } from '../../src/repositories/errors/order-status-changed-concurrently.error';
-import { EventAlreadyProcessedError } from '../../src/services/errors/payment-outcome.errors';
+import { EventAlreadyProcessedError } from '../../src/services/errors/outcome.errors';
 import { ProcessedEventOutcome } from '../../src/infra/database/entities/processed-event.entity';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';

@@ -9,7 +9,7 @@ import { ReactToPaymentOutcomeCommand } from '../../../src/commands/react-to-pay
 import { PaymentOutcome } from '../../../src/domain/payment-outcome.enum';
 import { KafkaConfig } from '../../../src/config/configuration';
 import { ConsumedMessageDeadLetterRepository } from '../../../src/repositories/consumed-message-dead-letter.repository';
-import { OrderNotFoundForPaymentError } from '../../../src/services/errors/payment-outcome.errors';
+import { OrderNotFoundForOutcomeError } from '../../../src/services/errors/outcome.errors';
 
 const EVENT_ID = '9b2e4f1a-8c3d-4e5f-a6b7-c8d9e0f1a2b3';
 const PAYMENT_ID = '1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d';
@@ -190,7 +190,11 @@ describe('PaymentEventsConsumer.handleMessage', () => {
     });
 
     it('should dead-letter after maxAttempts failures and then commit', async () => {
-      const notFound = new OrderNotFoundForPaymentError(ORDER_ID, PAYMENT_ID);
+      const notFound = new OrderNotFoundForOutcomeError(
+        ORDER_ID,
+        PAYMENT_PROCESSED_TOPIC,
+        PAYMENT_ID,
+      );
       const dispatch = jest.fn().mockRejectedValue(notFound);
       const { consumer, kafkaConsumer, deadLetters } = buildConsumer(dispatch);
 
@@ -275,11 +279,13 @@ describe('PaymentEventsConsumer.process (dead-letter retry entry point)', () => 
   it('should propagate a handler error after a single attempt', async () => {
     const dispatch = jest
       .fn()
-      .mockRejectedValue(new OrderNotFoundForPaymentError(ORDER_ID, PAYMENT_ID));
+      .mockRejectedValue(
+        new OrderNotFoundForOutcomeError(ORDER_ID, PAYMENT_PROCESSED_TOPIC, PAYMENT_ID),
+      );
     const { consumer } = buildConsumer(dispatch);
 
     await expect(consumer.process(PAYMENT_PROCESSED_TOPIC, processedValue())).rejects.toThrow(
-      OrderNotFoundForPaymentError,
+      OrderNotFoundForOutcomeError,
     );
     expect(dispatch).toHaveBeenCalledTimes(1);
   });

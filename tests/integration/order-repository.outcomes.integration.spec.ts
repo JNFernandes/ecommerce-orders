@@ -12,7 +12,7 @@ import { OrderItemEntity } from '../../src/infra/database/entities/order-item.en
 import { ProcessedEventEntity } from '../../src/infra/database/entities/processed-event.entity';
 import { OrderRepository } from '../../src/repositories/order.repository';
 import { OrderStatusChangedConcurrentlyError } from '../../src/repositories/errors/order-status-changed-concurrently.error';
-import { EventAlreadyProcessedError } from '../../src/services/errors/payment-outcome.errors';
+import { EventAlreadyProcessedError } from '../../src/services/errors/outcome.errors';
 
 jest.setTimeout(180_000);
 

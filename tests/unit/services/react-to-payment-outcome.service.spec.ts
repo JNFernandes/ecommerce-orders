@@ -12,8 +12,8 @@ import { ProcessedEventRepository } from '../../../src/repositories/processed-ev
 import { ProcessedEventOutcome } from '../../../src/infra/database/entities/processed-event.entity';
 import {
   EventAlreadyProcessedError,
-  OrderNotFoundForPaymentError,
-} from '../../../src/services/errors/payment-outcome.errors';
+  OrderNotFoundForOutcomeError,
+} from '../../../src/services/errors/outcome.errors';
 import { ALREADY_PROCESSED } from '../../../src/services/react-to-payment-outcome.service';
 
 const CUSTOMER_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
@@ -135,13 +135,13 @@ describe('ReactToPaymentOutcomeService — payment processed', () => {
     expect(message).toContain(inbound.eventId);
   });
 
-  it('should throw OrderNotFoundForPaymentError when no order matches orderId', async () => {
+  it('should throw OrderNotFoundForOutcomeError when no order matches orderId', async () => {
     const { service, commandBus } = buildService(null);
     const inbound = inboundFor('b3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d');
 
     await expect(
       service.execute(new ReactToPaymentOutcomeCommand(PaymentOutcome.PROCESSED, inbound)),
-    ).rejects.toThrow(OrderNotFoundForPaymentError);
+    ).rejects.toThrow(OrderNotFoundForOutcomeError);
     expect(commandBus.execute).not.toHaveBeenCalled();
   });
 
