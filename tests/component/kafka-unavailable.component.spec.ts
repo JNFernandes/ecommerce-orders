@@ -23,6 +23,10 @@ import {
   PAYMENT_FAILED_TOPIC,
   PAYMENT_PROCESSED_TOPIC,
 } from '../../src/infra/kafka/payment-message.parser';
+import {
+  STOCK_REJECTED_TOPIC,
+  STOCK_RESERVED_TOPIC,
+} from '../../src/infra/kafka/stock-message.parser';
 import { CustomerEntity } from '../../src/infra/database/entities/customer.entity';
 import { OrderEntity } from '../../src/infra/database/entities/order.entity';
 import { OrderItemEntity } from '../../src/infra/database/entities/order-item.entity';
@@ -64,6 +68,7 @@ const ENV: Record<string, string> = {
   PAYMENT_CONSUMER_BACKOFF_MAX_MS: '1000',
   KAFKA_GROUP_ID: 'lazy-connect-payments',
   KAFKA_PROJECTION_GROUP_ID: 'lazy-connect-projection',
+  KAFKA_INVENTORY_GROUP_ID: 'lazy-connect-inventory',
   DEAD_LETTER_RETRY_ENABLED: 'true',
   DEAD_LETTER_RETRY_INTERVAL_MS: '300',
   DEAD_LETTER_BASE_DELAY_MS: '200',
@@ -169,6 +174,8 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
         ORDER_CANCELLED_TOPIC,
         PAYMENT_PROCESSED_TOPIC,
         PAYMENT_FAILED_TOPIC,
+        STOCK_RESERVED_TOPIC,
+        STOCK_REJECTED_TOPIC,
       ].map((topic) => ({ topic, numPartitions: 1 })),
     });
     await admin.disconnect();
@@ -301,11 +308,8 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
       ]);
     });
 
-    // 3. The payment consumer, started while Kafka was down, has reconnected and consumes.
-    // Stands in for Inventory: the stock is already reserved, so the payment confirms (US-09).
-    await dataSource.query(`UPDATE orders SET "stockOutcome" = 'RESERVED' WHERE id = $1`, [
-      orderId,
-    ]);
+    // 3. The payment and inventory consumers, started while Kafka was down, have reconnected
+    // and consume: the order is confirmed once both outcomes have arrived (US-09).
     paymentsProducer = directKafka.producer();
     await paymentsProducer.connect();
     await paymentsProducer.send({
@@ -321,6 +325,22 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
             amount: 10,
             currency: 'USD',
             processedAt: new Date().toISOString(),
+          }),
+        },
+      ],
+    });
+    await paymentsProducer.send({
+      topic: STOCK_RESERVED_TOPIC,
+      messages: [
+        {
+          value: JSON.stringify({
+            eventId: randomUUID(),
+            aggregateId: randomUUID(),
+            occurredAt: new Date().toISOString(),
+            version: 1,
+            orderId,
+            items: [{ productId: 'p-1', quantity: 1 }],
+            reservedAt: new Date().toISOString(),
           }),
         },
       ],
