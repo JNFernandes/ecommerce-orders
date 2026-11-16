@@ -216,10 +216,16 @@ docker compose up -d
 # 2. In this repo
 npm ci
 cp .env.example .env
-npm run migration:run      # create/upgrade the orders schema in PostgreSQL
-npm run seed:customers     # seed customers for local testing
+npm run migration:run      # create/upgrade the orders schema (start:dev also does it)
+npm run seed:customers     # seed customers for local testing (needs the schema)
 npm run start:dev          # http://localhost:3000, Swagger at /api
 ```
+
+The app applies pending TypeORM migrations when it starts, before it serves requests, so a fresh
+database only needs the app to be started. If a migration fails, startup fails. Set
+`DB_MIGRATIONS_RUN=false` to manage migrations yourself with `npm run migration:run`. With
+several instances starting at once, run the migrations as a separate step instead: TypeORM does
+not lock against concurrent runs.
 
 ### Docker image
 
@@ -227,9 +233,11 @@ npm run start:dev          # http://localhost:3000, Swagger at /api
 docker build -t ecommerce-orders .
 ```
 
-The image runs `node dist/main` as the non-root `node` user. It is not part of any compose file;
-when you run it, pass the environment variables below. Inside a container, `localhost` is the
-container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container can reach.
+The image runs `node dist/main` as the non-root `node` user, which applies pending migrations on
+startup. Pass the environment variables below. Inside a container, `localhost` is the container
+itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container can reach. To seed the test
+customer from the image, run `node dist/infra/database/seeds/seed-customers.js` once the app has
+started. The `ecommerce-infra` compose file (`--profile apps`) runs the image this way.
 
 ## Environment variables
 
@@ -241,6 +249,7 @@ container itself, so point `DB_HOST` and `KAFKA_BROKERS` at hosts the container 
 | `DB_USERNAME` | `orders_user` | PostgreSQL user |
 | `DB_PASSWORD` | `orders_pass` | PostgreSQL password |
 | `DB_NAME` | `orders` | PostgreSQL database |
+| `DB_MIGRATIONS_RUN` | `true` | Apply pending TypeORM migrations at startup (`false` disables it) |
 | `KAFKA_BROKERS` | `localhost:9092` | Comma-separated Kafka brokers |
 | `KAFKA_CLIENT_ID` | `ecommerce-orders` | Kafka client id |
 | `KAFKA_CONNECTION_TIMEOUT_MS` | `1000` | Timeout for opening a broker connection |
