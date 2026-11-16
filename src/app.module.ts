@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import configuration, { DatabaseConfig } from './config/configuration';
+import { buildTypeOrmOptions } from './infra/database/typeorm-options';
 import { KafkaModule } from './infra/kafka/kafka.module';
 import { OrderEventsProducer } from './infra/kafka/order-events.producer';
 import { OrderEntity } from './infra/database/entities/order.entity';
@@ -43,19 +44,8 @@ import { DeadLetterRetryWorker } from './infra/dead-letter/dead-letter-retry.wor
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const dbConfig = configService.get<DatabaseConfig>('database');
-        return {
-          type: 'postgres' as const,
-          host: dbConfig?.host,
-          port: dbConfig?.port,
-          username: dbConfig?.username,
-          password: dbConfig?.password,
-          database: dbConfig?.database,
-          autoLoadEntities: true,
-          synchronize: false,
-        };
-      },
+      useFactory: (configService: ConfigService) =>
+        buildTypeOrmOptions(configService.get<DatabaseConfig>('database')),
     }),
     TypeOrmModule.forFeature([
       OrderEntity,
