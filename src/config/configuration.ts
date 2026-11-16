@@ -4,6 +4,11 @@ export interface DatabaseConfig {
   username: string;
   password: string;
   database: string;
+  /**
+   * Apply pending TypeORM migrations when the app starts, before it serves requests
+   * (`DB_MIGRATIONS_RUN`, on unless "false").
+   */
+  migrationsRun: boolean;
 }
 
 export interface KafkaConfig {
@@ -96,6 +101,7 @@ export default (): AppConfig => ({
     username: process.env.DB_USERNAME ?? 'orders',
     password: process.env.DB_PASSWORD ?? 'orders',
     database: process.env.DB_NAME ?? 'orders',
+    migrationsRun: process.env.DB_MIGRATIONS_RUN !== 'false',
   },
   kafka: {
     brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9092').split(','),
