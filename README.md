@@ -244,6 +244,7 @@ started. The `ecommerce-infra` compose file (`--profile apps`) runs the image th
 | Variable | Default (`.env.example`) | Description |
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
+| `CORS_ALLOWED_ORIGINS` | _(empty)_ | Comma-separated browser origins allowed to call the REST API and `/graphql` (see [CORS](#cors)). Empty or unset: no cross-origin access |
 | `DB_HOST` | `localhost` | PostgreSQL host |
 | `DB_PORT` | `5432` | PostgreSQL port |
 | `DB_USERNAME` | `orders_user` | PostgreSQL user |
@@ -282,6 +283,25 @@ it is down, and the projection catches up once it is back.
 - The logs show one warning per failed attempt ("Kafka is unreachable") and one line when it
   recovers ("Kafka is available again"). kafkajs's own per-retry connection errors are
   throttled to one line per broker per minute.
+
+### CORS
+
+Browsers may call the REST API and `/graphql` from another origin only if that origin is listed
+in `CORS_ALLOWED_ORIGINS`, for example:
+
+```bash
+CORS_ALLOWED_ORIGINS=https://shop.example.com,http://localhost:5173
+```
+
+- Each entry is matched exactly against the `Origin` header: scheme, host and port, with no
+  trailing slash and no wildcards. No origin is hardcoded.
+- An allowed origin gets `Access-Control-Allow-Origin` with its own value. Allowed methods are
+  `GET`, `POST` and `OPTIONS`, and allowed request headers are `Content-Type` and
+  `Authorization`. Credentials (cookies) are not allowed.
+- Any other origin gets no CORS headers at all, preflights included, so the browser blocks the
+  call.
+- Empty or unset (the default) leaves CORS off: no cross-origin access. Server-to-server calls
+  are unaffected either way.
 
 ## Tests
 

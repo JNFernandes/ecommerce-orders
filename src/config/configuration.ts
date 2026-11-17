@@ -84,8 +84,18 @@ export interface DeadLetterConfig {
   maxRetries: number;
 }
 
+export interface CorsConfig {
+  /**
+   * Origins allowed to call the REST API and /graphql from a browser (`CORS_ALLOWED_ORIGINS`,
+   * comma-separated, matched exactly, e.g. `https://shop.example.com`). Empty or unset: no
+   * cross-origin access.
+   */
+  allowedOrigins: string[];
+}
+
 export interface AppConfig {
   port: number;
+  cors: CorsConfig;
   database: DatabaseConfig;
   kafka: KafkaConfig;
   readModel: ReadModelConfig;
@@ -93,8 +103,22 @@ export interface AppConfig {
   deadLetter: DeadLetterConfig;
 }
 
+/**
+ * Splits a comma-separated origin list, trimming whitespace and dropping empty entries, so an
+ * empty or unset value yields no origins.
+ */
+export function parseOriginList(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+}
+
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
+  cors: {
+    allowedOrigins: parseOriginList(process.env.CORS_ALLOWED_ORIGINS),
+  },
   database: {
     host: process.env.DB_HOST ?? 'localhost',
     port: parseInt(process.env.DB_PORT ?? '5432', 10),
