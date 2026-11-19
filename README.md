@@ -73,10 +73,13 @@ See [`src/README.md`](src/README.md) for the folder layout.
 | `StockReserved` | `inventory.stock-reserved` | Consumed: confirms the order once the payment is also processed | Built |
 | `StockRejected` | `inventory.stock-rejected` | Consumed: cancels the order, stores the reason | Built |
 | `orders.*` (own events) | `orders.*` | Consumed: builds the read model (`order_views`) | Built |
+| `UserRegistered` | `identity.user-registered` | Consumed: creates the customer (see [Customers](#customers)) | Planned |
 
 Every event carries `eventId`, `occurredAt`, `aggregateId` and `version`. Payment and Inventory
 events reference the order by `orderId`; their `aggregateId` is the payment id or the
-reservation id, never the order id. Consumers dedupe by `eventId`. The order saga is
+reservation id, never the order id. Identity's `identity.user-registered` carries the customer
+id in `customerId`; its `aggregateId` is the user id, never the customer id. Consumers dedupe by
+`eventId`. The order saga is
 choreographed ([ADR 0003](docs/adr/0003-saga-by-choreography.md)), with Orders joining the
 payment and stock outcomes ([ADR 0006](docs/adr/0006-order-joins-payment-and-stock-outcomes.md)).
 Payload details are in [`docs/events/`](docs/events/) and must stay consistent with the
@@ -101,11 +104,28 @@ platform contract in `ecommerce-infra/docs/events.md`.
 - Set `KAFKA_CONSUMER_ENABLED=false` to run the HTTP API without the consumers (payment,
   inventory and read-model projection).
 
+### Customers
+
+Orders keeps its own `customers` table only to check that an order's `customerId` exists.
+Customers are created from Identity's `identity.user-registered` event (constitution 1.3.0,
+Principle VII): one customer per event, with the event's `customerId` as its id (not the
+`aggregateId`, which is the user id). The REST and GraphQL APIs never create customers.
+
+- Creation is eventually consistent. An order placed before Orders has seen the customer's
+  `identity.user-registered` is rejected with `404`, exactly like an order for an unknown
+  customer; nothing is saved or published, and the client retries later.
+- The consumer will follow the same rules as the other consumers: dedupe by `eventId` in
+  `processed_events`, commit the offset after the save, retry with backoff, then dead-letter to
+  `consumed_message_dead_letters`. A customer that already exists (for example a seeded one) is
+  left as it is.
+- **Status:** the consumer is planned. Until it is built, customers come only from
+  `npm run seed:customers` (local development and tests).
+
 ## Endpoints
 
 | Method | Path | Description | Responses |
 |---|---|---|---|
-| `POST` | `/orders` | Place an order (`customerId`, `items[]`) | `201` `{ orderId }`, `400` invalid input |
+| `POST` | `/orders` | Place an order (`customerId`, `items[]`) | `201` `{ orderId }`, `400` invalid input, `404` unknown customer |
 | `POST` | `/orders/:orderId/cancel` | Cancel a `PENDING` order | `200`, `404` not found, `409` not `PENDING` |
 | `POST` | `/orders/:orderId/confirm` | Confirm a `PENDING` order manually (payment success does this automatically) | `200`, `404` not found, `409` not `PENDING` |
 
@@ -217,7 +237,7 @@ docker compose up -d
 npm ci
 cp .env.example .env
 npm run migration:run      # create/upgrade the orders schema (start:dev also does it)
-npm run seed:customers     # seed customers for local testing (needs the schema)
+npm run seed:customers     # seed a test customer (needs the schema; see Customers)
 npm run start:dev          # http://localhost:3000, Swagger at /api
 ```
 

@@ -1,6 +1,59 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change:    1.2.0 → 1.3.0
+Bump rationale:    MINOR — materially expanded guidance: one new consumed topic
+                   (`identity.user-registered`) and the rule that Orders customers are created
+                   from it. No principle removed, renamed or redefined.
+
+Modified principles:
+  - VII. Kafka Events (Producer & Consumers) — consumed topic `identity.user-registered`
+    (published by ecommerce-identity) creates the Orders customer. Its `aggregateId` is the
+    **user id** and MUST NOT be used as a customer id; the customer id is the `customerId` field
+    and MUST be used as the Orders customer id. Customers are created only from this event
+    (eventual consistency: an order placed before the customer exists is rejected, as today).
+    Creating a customer that already exists is a no-op. Same consumer rules as the payment and
+    stock consumers (dedupe by `eventId` in the same transaction as the customer insert, offsets
+    committed after the PostgreSQL save, retry with backoff, then dead-letter).
+
+Added sections:
+  - (no new top-level sections)
+
+Removed sections:
+  - (none)
+
+Templates reviewed:
+  ✅ .specify/templates/plan-template.md  — Constitution Check gates derive from this file at runtime; no static change needed.
+  ✅ .specify/templates/spec-template.md  — Generic structure; no mandatory section added or removed.
+  ✅ .specify/templates/tasks-template.md — A consumer story fits the existing phases; no new task category.
+  ✅ .specify/templates/commands/*.md     — Directory not present in this project; nothing to update.
+
+Runtime guidance:
+  ✅ README.md — events table lists `identity.user-registered` (consumer planned); "Customers"
+    section describes how customers are created; `POST /orders` documents the 404 for an unknown
+    customer; the seed is described as local tooling until the consumer exists.
+  ✅ CLAUDE.md — event contracts list the consumed topic, its identity rules and customer
+    creation.
+
+Migration note (code that must change, Governance → Amendment procedure):
+  ⚠ No consumer for `identity.user-registered` exists yet; customers come only from
+    `npm run seed:customers`. A follow-up story MUST add the consumer (own consumer group),
+    insert into `customers` keyed by `customerId`, dedupe through `processed_events` and
+    dead-letter through `consumed_message_dead_letters`, like the other consumers.
+  ⚠ `CustomerEntity` is documented as a "read-only reference row"; the follow-up story makes it
+    written by the consumer and MUST update that JSDoc.
+  ⚠ docs/events/ has no user-registered.md yet; add it with the consumer, consistent with
+    ecommerce-infra/docs/events.md (which lists the Orders consumer as planned).
+  ⚠ The follow-up story SHOULD record the customer-creation decision as an ADR (next free
+    number in docs/adr/).
+
+Deferred TODOs:
+  (none)
+-->
+
+<!--
+SYNC IMPACT REPORT (previous amendment)
+=======================================
 Version change:    1.1.0 → 1.2.0
 Bump rationale:    MINOR — materially expanded guidance: two new consumed topics (Inventory stock
                    outcomes) and a joined order lifecycle (confirm on payment AND stock, cancel
@@ -56,8 +109,8 @@ Deferred TODOs:
 -->
 
 <!--
-SYNC IMPACT REPORT (previous amendment)
-=======================================
+SYNC IMPACT REPORT (earlier amendment)
+======================================
 Version change:    1.0.0 → 1.1.0
 Bump rationale:    MINOR — materially expanded guidance (Kafka consumers, MongoDB read model,
                    ADR numbering, local infrastructure) plus consolidation of the duplicated
@@ -221,6 +274,8 @@ Kafka is the event bus between services. This service both **produces** and **co
 - `inventory.stock-reserved` (published by ecommerce-inventory) — records the stock reservation;
   confirms the referenced order once the payment is also processed (Principle I).
 - `inventory.stock-rejected` (published by ecommerce-inventory) — cancels the referenced order.
+- `identity.user-registered` (published by ecommerce-identity) — creates the Orders customer
+  (see **Customers** below).
 - The authoritative contract for every cross-service topic is `ecommerce-infra/docs/events.md`.
 - This service's own `orders.*` events — feed the projection that builds the MongoDB read model
   (see Principle II).
@@ -237,9 +292,22 @@ Kafka is the event bus between services. This service both **produces** and **co
   **payment id** and MUST NOT be used as an order id.
 - Inventory events identify the order by their `orderId` field, exactly like payment events.
   Their `aggregateId` is the **reservation id** and MUST NOT be used as an order id.
+- `identity.user-registered` carries the customer id in its `customerId` field, which MUST be
+  used as the Orders customer id. Its `aggregateId` is the **user id** and MUST NOT be used as a
+  customer id.
 - Payloads MUST be serialized as JSON.
 - Breaking changes to a payload schema require a new topic version (e.g. `orders.order-placed.v2`).
 - Event classes MUST be documented with JSDoc describing every field.
+
+**Customers:**
+- Orders customers are created from `identity.user-registered`: one customer per event, with the
+  event's `customerId` as its id. The REST and GraphQL APIs MUST NOT create customers. Seed
+  scripts are local-development and test tooling only.
+- Customer creation is eventually consistent with Identity. An order placed for a customer that
+  Orders has not created yet MUST be rejected exactly as for an unknown customer today
+  (`404`, no order saved, no event published); it is not queued or retried.
+- Creating a customer that already exists (for example a seeded one) MUST be a no-op, not a
+  failure.
 
 **Producer failure handling:**
 - If Kafka publish fails after a successful DB save, the error MUST be logged with full context.
@@ -250,9 +318,10 @@ Kafka is the event bus between services. This service both **produces** and **co
 - Consumers MUST be idempotent: events are deduplicated by `eventId`, and processing the same
   event twice MUST produce the same result.
 - Offsets MUST be committed only after the resulting database save has succeeded (PostgreSQL for
-  the payment and stock consumers, MongoDB for the projection).
-- The stock consumers follow exactly the same rules as the payment consumers: dedupe by
-  `eventId` in the same transaction as the state change, retry with backoff, then dead-letter.
+  the payment, stock and customer consumers, MongoDB for the projection).
+- The stock and customer (`identity.user-registered`) consumers follow exactly the same rules as
+  the payment consumers: dedupe by `eventId` in the same transaction as the state change, retry
+  with backoff, then dead-letter.
 - Failed processing MUST be retried with exponential backoff; once retries are exhausted the
   event MUST be dead-lettered and the failure logged with full context.
 - State changes driven by consumed events MUST go through the same Domain → Repository path as
@@ -380,4 +449,4 @@ This constitution supersedes all other project conventions and style guides. Whe
 
 **Compliance**: Every PR review MUST verify that no constitutional principle is violated. Reviewers are empowered to block merges for violations without exception. New principles take effect immediately upon merge.
 
-**Version**: 1.2.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-11-14
+**Version**: 1.3.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-11-19
