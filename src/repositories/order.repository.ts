@@ -135,7 +135,8 @@ export class OrderRepository {
         await manager.insert(ProcessedEventEntity, {
           eventId: inbound.eventId,
           topic: inbound.topic,
-          orderId: inbound.orderId,
+          orderId: inbound.orderId ?? null,
+          customerId: inbound.customerId ?? null,
           paymentId: inbound.paymentId ?? null,
           reservationId: inbound.reservationId ?? null,
           outcome: toProcessedEventOutcome(record),

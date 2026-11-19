@@ -27,6 +27,8 @@ import { ApplyPaymentOutcomeService } from './services/apply-payment-outcome.ser
 import { ApplyStockOutcomeService } from './services/apply-stock-outcome.service';
 import { PaymentEventsConsumer } from './infra/kafka/payment-events.consumer';
 import { InventoryEventsConsumer } from './infra/kafka/inventory-events.consumer';
+import { IdentityEventsConsumer } from './infra/kafka/identity-events.consumer';
+import { CreateCustomerService } from './services/create-customer.service';
 import { OrderProjectionConsumer } from './infra/kafka/order-projection.consumer';
 import { OrdersController } from './controllers/orders.controller';
 import { ReadModelModule } from './read-model/read-model.module';
@@ -72,6 +74,7 @@ import { DeadLetterRetryWorker } from './infra/dead-letter/dead-letter-retry.wor
     OutcomeWriteFlow,
     ApplyPaymentOutcomeService,
     ApplyStockOutcomeService,
+    CreateCustomerService,
     OrderRepository,
     OrderDeadLetterRepository,
     CustomerRepository,
@@ -80,6 +83,7 @@ import { DeadLetterRetryWorker } from './infra/dead-letter/dead-letter-retry.wor
     OrderEventsProducer,
     PaymentEventsConsumer,
     InventoryEventsConsumer,
+    IdentityEventsConsumer,
     OrderProjectionConsumer,
     ListOrdersService,
     GetOrderService,

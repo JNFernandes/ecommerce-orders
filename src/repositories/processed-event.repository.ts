@@ -35,7 +35,8 @@ export class ProcessedEventRepository {
       await this.repository.insert({
         eventId: ref.eventId,
         topic: ref.topic,
-        orderId: ref.orderId,
+        orderId: ref.orderId ?? null,
+        customerId: ref.customerId ?? null,
         paymentId: ref.paymentId ?? null,
         reservationId: ref.reservationId ?? null,
         outcome,

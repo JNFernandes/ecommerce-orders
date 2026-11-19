@@ -18,6 +18,28 @@ describe('parseOriginList', () => {
   });
 });
 
+describe('configuration: kafka', () => {
+  const original = process.env.KAFKA_IDENTITY_GROUP_ID;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.KAFKA_IDENTITY_GROUP_ID;
+    } else {
+      process.env.KAFKA_IDENTITY_GROUP_ID = original;
+    }
+  });
+
+  it('uses the default identity consumer group when KAFKA_IDENTITY_GROUP_ID is unset', () => {
+    delete process.env.KAFKA_IDENTITY_GROUP_ID;
+    expect(configuration().kafka.identityGroupId).toBe('ecommerce-orders-identity-consumer');
+  });
+
+  it('reads the identity consumer group from KAFKA_IDENTITY_GROUP_ID', () => {
+    process.env.KAFKA_IDENTITY_GROUP_ID = 'custom-identity-group';
+    expect(configuration().kafka.identityGroupId).toBe('custom-identity-group');
+  });
+});
+
 describe('configuration: cors', () => {
   const original = process.env.CORS_ALLOWED_ORIGINS;
 

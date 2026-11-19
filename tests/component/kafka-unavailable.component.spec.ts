@@ -49,6 +49,8 @@ import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.cons
 import { InventoryEventsConsumer } from '../../src/infra/kafka/inventory-events.consumer';
 import { ApplyStockOutcomeService } from '../../src/services/apply-stock-outcome.service';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
+import { IdentityEventsConsumer } from '../../src/infra/kafka/identity-events.consumer';
+import { CreateCustomerService } from '../../src/services/create-customer.service';
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { DeadLetterRetryWorker } from '../../src/infra/dead-letter/dead-letter-retry.worker';
@@ -230,6 +232,8 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
         PaymentEventsConsumer,
         InventoryEventsConsumer,
         OrderProjectionConsumer,
+        IdentityEventsConsumer,
+        CreateCustomerService,
         // MongoDB is not part of this scenario: the projection consumer runs against a stub.
         { provide: OrderProjectionService, useValue: { project: jest.fn() } },
         DeadLetterRetryWorker,
