@@ -75,12 +75,19 @@ warning (`--max-warnings 0`), or a formatting violation.
   `inventory.stock-reserved` / `inventory.stock-rejected` (published by ecommerce-inventory) by
   `src/infra/kafka/inventory-events.consumer.ts` (group `KAFKA_INVENTORY_GROUP_ID`, US-09); own
   `orders.*` events by `src/infra/kafka/order-projection.consumer.ts` (group
-  `KAFKA_PROJECTION_GROUP_ID`, US-05).
+  `KAFKA_PROJECTION_GROUP_ID`, US-05); `identity.user-registered` (published by
+  ecommerce-identity) creates the customer (constitution 1.3.0; consumer not built yet).
 - `OrderCancelled` has an optional `reason`: `payment failed: <reason>` or `stock rejected:
   <reason>` for outcome-driven cancels; omitted for REST cancels.
 - Every payload: `eventId` (UUID), `occurredAt` (ISO), `aggregateId` (UUID), `version` (int), JSON.
 - Payment and Inventory events identify the order by **`orderId`**. Their `aggregateId` is the
   payment id / reservation id: never use it as an order id.
+- Customers: created only from `identity.user-registered`, keyed by its **`customerId`** field
+  (its `aggregateId` is the user id: never use it as a customer id). The APIs never create
+  customers; `npm run seed:customers` is local/test tooling. Eventual consistency: an order for
+  a customer Orders hasn't created yet gets the usual `404` (not queued). Creating an existing
+  customer is a no-op. Same consumer rules as payment/stock (dedupe, commit after save, backoff,
+  dead-letter).
 - Order lifecycle (constitution 1.2.0, ADR 0006): confirm only when payment processed **and**
   stock reserved; cancel as soon as payment fails **or** stock is rejected; outcomes arrive in any
   order; an outcome for a non-`PENDING` order is ignored and logged (warning for a processed
