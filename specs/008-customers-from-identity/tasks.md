@@ -42,29 +42,29 @@ JSDoc on public classes/methods; no `any`. After each phase run the quality gate
 
 **Independent test**: same message twice → one customer; new eventId for an existing customer → unchanged, no dead letter.
 
-- [ ] T021 [P] [US2] Unit test: handler with `createIfAbsent` returning `{ created: false }` logs the no-op and does not throw, in tests/unit/services/create-customer.service.spec.ts
-- [ ] T022 [US2] Integration tests in tests/integration/customer-repository.integration.spec.ts: existing id with other name/email → unchanged + `IGNORED_CUSTOMER_EXISTS`; same `eventId` twice → `EventAlreadyProcessedError`; two concurrent `createIfAbsent` for one id with different eventIds → one row, both resolve
-- [ ] T023 [US2] Component tests in tests/component/customer-registration.component.spec.ts: redelivery of the same message → one customer, one processed event; new eventId for the same `customerId` with another name → customer unchanged, no row in `consumed_message_dead_letters`
+- [X] T021 [P] [US2] Unit test: handler with `createIfAbsent` returning `{ created: false }` logs the no-op and does not throw, in tests/unit/services/create-customer.service.spec.ts
+- [X] T022 [US2] Integration tests in tests/integration/customer-repository.integration.spec.ts: existing id with other name/email → unchanged + `IGNORED_CUSTOMER_EXISTS`; same `eventId` twice → `EventAlreadyProcessedError`; two concurrent `createIfAbsent` for one id with different eventIds → one row, both resolve
+- [X] T023 [US2] Component tests in tests/component/customer-registration.component.spec.ts: redelivery of the same message → one customer, one processed event; new eventId for the same `customerId` with another name → customer unchanged, no row in `consumed_message_dead_letters`
 
 ## Phase 5: User Story 3 — reliable processing (P2)
 
 **Independent test**: malformed message → dead letter at once, next valid message processed.
 
-- [ ] T024 [P] [US3] Unit tests for the parser's malformed cases (bad JSON, non-object, missing eventId/customerId/email, non-UUID ids, empty email, version 2, name not a string, name 101 chars → `MalformedMessageError`) in tests/unit/infra/user-registered-message.parser.spec.ts
-- [ ] T025 [P] [US3] Unit test: consumer dead-letters a malformed message and commits, and on a repository failure retries then dead-letters as retryable, copying the matching cases of tests/unit/infra/inventory-events.consumer.spec.ts into tests/unit/infra/identity-events.consumer.spec.ts
-- [ ] T026 [US3] Component test in tests/component/customer-registration.component.spec.ts: publish `not json` and a message without `email`, then a valid one → two not-retryable rows in `consumed_message_dead_letters` (topic `identity.user-registered`) and the valid customer created
-- [ ] T027 [P] [US3] Integration test: migration down then up keeps existing `customers` and payment/stock `processed_events` rows, copying tests/integration/order-outcomes-migration.integration.spec.ts into tests/integration/customer-registration-migration.integration.spec.ts
+- [X] T024 [P] [US3] Unit tests for the parser's malformed cases (bad JSON, non-object, missing eventId/customerId/email, non-UUID ids, empty email, version 2, name not a string, name 101 chars → `MalformedMessageError`) in tests/unit/infra/user-registered-message.parser.spec.ts
+- [X] T025 [P] [US3] Unit test: consumer dead-letters a malformed message and commits, and on a repository failure retries then dead-letters as retryable, copying the matching cases of tests/unit/infra/inventory-events.consumer.spec.ts into tests/unit/infra/identity-events.consumer.spec.ts
+- [X] T026 [US3] Component test in tests/component/customer-registration.component.spec.ts: publish `not json` and a message without `email`, then a valid one → two not-retryable rows in `consumed_message_dead_letters` (topic `identity.user-registered`) and the valid customer created
+- [X] T027 [P] [US3] Integration test: migration down then up keeps existing `customers` and payment/stock `processed_events` rows, copying tests/integration/order-outcomes-migration.integration.spec.ts into tests/integration/customer-registration-migration.integration.spec.ts
 
 ## Phase 6: User Story 4 — documentation (P3)
 
-- [ ] T028 [P] [US4] Create docs/events/user-registered.md from contracts/user-registered.md, in the format of docs/events/stock-reserved.md, consistent with ecommerce-infra/docs/events.md
-- [ ] T029 [P] [US4] Create docs/adr/0007-customers-from-identity-events.md (Context / Decision / Consequences, from research.md items 2, 4, 5) using docs/adr/template.md, and add it to docs/adr/README.md
-- [ ] T030 [US4] Update README.md: events table `UserRegistered` → Implemented; Customers section — consumer implemented, `KAFKA_IDENTITY_GROUP_ID`, early order → `404`, client retries later; `npm run seed:customers` marked legacy (local development only)
-- [ ] T031 [P] [US4] Update CLAUDE.md: replace "consumer not built yet" with the consumer path `src/infra/kafka/identity-events.consumer.ts` and group `KAFKA_IDENTITY_GROUP_ID`; add `KAFKA_IDENTITY_GROUP_ID` to the consumer env list
+- [X] T028 [P] [US4] Create docs/events/user-registered.md from contracts/user-registered.md, in the format of docs/events/stock-reserved.md, consistent with ecommerce-infra/docs/events.md
+- [X] T029 [P] [US4] Create docs/adr/0007-customers-from-identity-events.md (Context / Decision / Consequences, from research.md items 2, 4, 5) using docs/adr/template.md, and add it to docs/adr/README.md
+- [X] T030 [US4] Update README.md: events table `UserRegistered` → Implemented; Customers section — consumer implemented, `KAFKA_IDENTITY_GROUP_ID`, early order → `404`, client retries later; `npm run seed:customers` marked legacy (local development only)
+- [X] T031 [P] [US4] Update CLAUDE.md: replace "consumer not built yet" with the consumer path `src/infra/kafka/identity-events.consumer.ts` and group `KAFKA_IDENTITY_GROUP_ID`; add `KAFKA_IDENTITY_GROUP_ID` to the consumer env list
 
 ## Phase 7: Polish
 
-- [ ] T032 Run `npm run build`, `npm run lint`, `npm run format:check`, `npm run test` and fix failures
+- [X] T032 Run `npm run build`, `npm run lint`, `npm run format:check`, `npm run test` and fix failures
 - [ ] T033 Walk through quickstart.md steps 1–5 against local infra
 
 ## Dependencies

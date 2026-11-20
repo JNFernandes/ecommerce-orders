@@ -9,6 +9,7 @@ import {
   ProcessedEventOutcome,
 } from '../../src/infra/database/entities/processed-event.entity';
 import { CustomerRepository } from '../../src/repositories/customer.repository';
+import { EventAlreadyProcessedError } from '../../src/services/errors/outcome.errors';
 
 jest.setTimeout(180_000);
 
@@ -65,5 +66,50 @@ describe('CustomerRepository.createIfAbsent (integration, real PostgreSQL)', () 
       reservationId: null,
       outcome: ProcessedEventOutcome.CUSTOMER_CREATED,
     });
+  });
+
+  it('should leave an existing customer unchanged and record IGNORED_CUSTOMER_EXISTS', async () => {
+    const id = randomUUID();
+    await repository.createIfAbsent(
+      Customer.register({ id, name: 'Ada', email: 'ada@example.com' }),
+      refFor(id),
+    );
+    const ref = refFor(id);
+
+    await expect(
+      repository.createIfAbsent(
+        Customer.register({ id, name: 'Other', email: 'other@example.com' }),
+        ref,
+      ),
+    ).resolves.toEqual({ created: false });
+
+    expect(await dataSource.getRepository(CustomerEntity).findOneBy({ id })).toMatchObject({
+      name: 'Ada',
+      email: 'ada@example.com',
+    });
+    expect(
+      await dataSource.getRepository(ProcessedEventEntity).findOneBy({ eventId: ref.eventId }),
+    ).toMatchObject({ outcome: ProcessedEventOutcome.IGNORED_CUSTOMER_EXISTS });
+  });
+
+  it('should throw EventAlreadyProcessedError for the same eventId twice', async () => {
+    const customer = Customer.register({ id: randomUUID(), name: null, email: 'a@b.c' });
+    const ref = refFor(customer.id);
+    await repository.createIfAbsent(customer, ref);
+
+    await expect(repository.createIfAbsent(customer, ref)).rejects.toBeInstanceOf(
+      EventAlreadyProcessedError,
+    );
+  });
+
+  it('should create one row when two registrations for one id race', async () => {
+    const id = randomUUID();
+    const results = await Promise.all([
+      repository.createIfAbsent(Customer.register({ id, name: 'A', email: 'a@b.c' }), refFor(id)),
+      repository.createIfAbsent(Customer.register({ id, name: 'B', email: 'b@b.c' }), refFor(id)),
+    ]);
+
+    expect(results.map((result) => result.created).sort()).toEqual([false, true]);
+    expect(await dataSource.getRepository(CustomerEntity).countBy({ id })).toBe(1);
   });
 });

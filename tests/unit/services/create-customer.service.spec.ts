@@ -49,6 +49,19 @@ describe('CreateCustomerService', () => {
     expect(createIfAbsent).not.toHaveBeenCalled();
   });
 
+  it('should log the no-op and not throw when the customer already exists', async () => {
+    const createIfAbsent = jest.fn().mockResolvedValue({ created: false });
+
+    const result = await build(createIfAbsent).execute(
+      new CreateCustomerCommand(CUSTOMER_ID, 'Other', 'other@example.com', REF),
+    );
+
+    expect(result).toBe('ALREADY_EXISTS');
+    expect(logSpies[0]).toHaveBeenCalledWith(
+      expect.stringContaining('customer already exists (no-op)'),
+    );
+  });
+
   it('should treat an already processed eventId as success', async () => {
     const createIfAbsent = jest.fn().mockRejectedValue(new EventAlreadyProcessedError(EVENT_ID));
 

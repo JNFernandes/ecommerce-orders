@@ -133,6 +133,31 @@ describe('IdentityEventsConsumer', () => {
     ]);
   });
 
+  it('should dead-letter a malformed message once, without dispatching, then commit', async () => {
+    const dispatch = jest.fn();
+    const { consumer, kafkaConsumer, deadLetters } = buildConsumer(dispatch);
+
+    await consumer.handleMessage(payloadFor(registeredValue({ email: undefined })));
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(deadLetters.recordMalformed).toHaveBeenCalledTimes(1);
+    expect(kafkaConsumer.commitOffsets).toHaveBeenCalledWith([
+      { topic: USER_REGISTERED_TOPIC, partition: 1, offset: '8' },
+    ]);
+  });
+
+  it('should retry a repository failure through every attempt, dead-letter it as retryable, then commit', async () => {
+    const dispatch = jest.fn().mockRejectedValue(new Error('connection terminated'));
+    const { consumer, kafkaConsumer, deadLetters } = buildConsumer(dispatch);
+
+    await consumer.handleMessage(payloadFor(registeredValue()));
+
+    expect(dispatch).toHaveBeenCalledTimes(KAFKA_CONFIG.maxAttempts);
+    expect(deadLetters.recordRetriesExhausted).toHaveBeenCalledTimes(1);
+    expect(deadLetters.recordMalformed).not.toHaveBeenCalled();
+    expect(kafkaConsumer.commitOffsets).toHaveBeenCalledTimes(1);
+  });
+
   it('process() should parse and dispatch once, without retrying, dead-lettering or committing', async () => {
     const dispatch = jest.fn().mockResolvedValue(undefined);
     const { consumer, kafkaConsumer, deadLetters } = buildConsumer(dispatch);

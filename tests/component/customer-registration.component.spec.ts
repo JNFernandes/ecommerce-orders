@@ -23,7 +23,10 @@ import { OrderEntity } from '../../src/infra/database/entities/order.entity';
 import { OrderItemEntity } from '../../src/infra/database/entities/order-item.entity';
 import { OrderDeadLetterEntity } from '../../src/infra/database/entities/order-dead-letter.entity';
 import { ProcessedEventEntity } from '../../src/infra/database/entities/processed-event.entity';
-import { ConsumedMessageDeadLetterEntity } from '../../src/infra/database/entities/consumed-message-dead-letter.entity';
+import {
+  ConsumedMessageDeadLetterEntity,
+  ConsumedMessageFailureType,
+} from '../../src/infra/database/entities/consumed-message-dead-letter.entity';
 import { OrderRepository } from '../../src/repositories/order.repository';
 import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-letter.repository';
 import { CustomerRepository } from '../../src/repositories/customer.repository';
@@ -182,5 +185,68 @@ describe('Customer registration — identity.user-registered → customers (comp
       .post('/orders')
       .send({ customerId, items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }] });
     expect(response.status).toBe(201);
+  });
+
+  it('should keep one customer on redelivery and ignore a new eventId for an existing customer', async () => {
+    const customerId = randomUUID();
+    const userId = randomUUID();
+    const original = userRegistered(customerId, userId);
+    const repeat = JSON.stringify({
+      ...(JSON.parse(original) as Record<string, unknown>),
+      eventId: randomUUID(),
+      name: 'Someone Else',
+    });
+
+    await testProducer.send({
+      topic: USER_REGISTERED_TOPIC,
+      messages: [original, original, repeat].map((value) => ({ key: userId, value })),
+    });
+
+    const processed = dataSource.getRepository(ProcessedEventEntity);
+    await waitFor(async () => {
+      expect(await processed.countBy({ customerId })).toBe(2);
+    }, 120_000);
+    expect(await dataSource.getRepository(CustomerEntity).countBy({ id: customerId })).toBe(1);
+    expect(
+      await dataSource.getRepository(CustomerEntity).findOneBy({ id: customerId }),
+    ).toMatchObject({ name: 'Ada Lovelace' });
+    expect(
+      await dataSource.getRepository(ConsumedMessageDeadLetterEntity).countBy({
+        topic: USER_REGISTERED_TOPIC,
+        failureType: ConsumedMessageFailureType.RETRIES_EXHAUSTED,
+      }),
+    ).toBe(0);
+  });
+
+  it('should dead-letter malformed messages (not retryable) and still process the next valid one', async () => {
+    const customerId = randomUUID();
+    const userId = randomUUID();
+    const withoutEmail = JSON.stringify({
+      ...(JSON.parse(userRegistered(randomUUID(), userId)) as Record<string, unknown>),
+      email: undefined,
+    });
+    const deadLetters = dataSource.getRepository(ConsumedMessageDeadLetterEntity);
+    const before = await deadLetters.countBy({
+      topic: USER_REGISTERED_TOPIC,
+      failureType: ConsumedMessageFailureType.MALFORMED,
+    });
+
+    await testProducer.send({
+      topic: USER_REGISTERED_TOPIC,
+      messages: ['not json', withoutEmail, userRegistered(customerId, userId)].map((value) => ({
+        key: userId,
+        value,
+      })),
+    });
+
+    await waitFor(async () => {
+      expect(await customerExists(customerId)).toBe(true);
+    }, 120_000);
+    expect(
+      await deadLetters.countBy({
+        topic: USER_REGISTERED_TOPIC,
+        failureType: ConsumedMessageFailureType.MALFORMED,
+      }),
+    ).toBe(before + 2);
   });
 });
