@@ -76,7 +76,8 @@ warning (`--max-warnings 0`), or a formatting violation.
   `src/infra/kafka/inventory-events.consumer.ts` (group `KAFKA_INVENTORY_GROUP_ID`, US-09); own
   `orders.*` events by `src/infra/kafka/order-projection.consumer.ts` (group
   `KAFKA_PROJECTION_GROUP_ID`, US-05); `identity.user-registered` (published by
-  ecommerce-identity) creates the customer (constitution 1.3.0; consumer not built yet).
+  ecommerce-identity) creates the customer via
+  `src/infra/kafka/identity-events.consumer.ts` (group `KAFKA_IDENTITY_GROUP_ID`, US-10).
 - `OrderCancelled` has an optional `reason`: `payment failed: <reason>` or `stock rejected:
   <reason>` for outcome-driven cancels; omitted for REST cancels.
 - Every payload: `eventId` (UUID), `occurredAt` (ISO), `aggregateId` (UUID), `version` (int), JSON.
@@ -108,7 +109,7 @@ warning (`--max-warnings 0`), or a formatting violation.
 - Kafka latency env: `KAFKA_CONNECTION_TIMEOUT_MS` (1000) and `KAFKA_PRODUCER_RETRIES` (1) bound a
   failed publish to about 3 s. They apply to the producer's own kafkajs client only; the
   consumers' client keeps kafkajs's default retries.
-- Consumer env: `KAFKA_GROUP_ID`, `KAFKA_INVENTORY_GROUP_ID`, `KAFKA_PROJECTION_GROUP_ID`, `MONGO_URI`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
+- Consumer env: `KAFKA_GROUP_ID`, `KAFKA_INVENTORY_GROUP_ID`, `KAFKA_PROJECTION_GROUP_ID`, `KAFKA_IDENTITY_GROUP_ID`, `MONGO_URI`, `KAFKA_CONSUMER_ENABLED`, `PAYMENT_CONSUMER_MAX_ATTEMPTS`,
   `PAYMENT_CONSUMER_BACKOFF_INITIAL_MS`, `PAYMENT_CONSUMER_BACKOFF_MAX_MS`.
 
 ## Dead-letter retry (US-08)
