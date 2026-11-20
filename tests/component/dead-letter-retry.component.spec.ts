@@ -44,6 +44,8 @@ import { PaymentEventsConsumer } from '../../src/infra/kafka/payment-events.cons
 import { InventoryEventsConsumer } from '../../src/infra/kafka/inventory-events.consumer';
 import { ApplyStockOutcomeService } from '../../src/services/apply-stock-outcome.service';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
+import { IdentityEventsConsumer } from '../../src/infra/kafka/identity-events.consumer';
+import { CreateCustomerService } from '../../src/services/create-customer.service';
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
 import { PAYMENT_PROCESSED_TOPIC } from '../../src/infra/kafka/payment-message.parser';
 import { STOCK_RESERVED_TOPIC } from '../../src/infra/kafka/stock-message.parser';
@@ -166,6 +168,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
         PaymentEventsConsumer,
         InventoryEventsConsumer,
         OrderProjectionConsumer,
+        IdentityEventsConsumer,
+        CreateCustomerService,
         // The inbound cases here are payment messages, so MongoDB is not needed: the projection
         // service (a dependency of OrderProjectionConsumer, which the worker routes orders.*
         // rows to) is a stub. Projection retries are covered by the worker unit tests.
@@ -376,6 +380,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
       moduleRef.get(PaymentEventsConsumer),
       moduleRef.get(InventoryEventsConsumer),
       moduleRef.get(OrderProjectionConsumer),
+      moduleRef.get(IdentityEventsConsumer),
     );
     const rows = Array.from({ length: 4 }, () => {
       const eventId = randomUUID();

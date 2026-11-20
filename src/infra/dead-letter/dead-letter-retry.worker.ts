@@ -21,6 +21,7 @@ import { ConsumedMessageDeadLetterEntity } from '../database/entities/consumed-m
 import { ConsumedMessageDeadLetterRepository } from '../../repositories/consumed-message-dead-letter.repository';
 import { PaymentEventsConsumer } from '../kafka/payment-events.consumer';
 import { InventoryEventsConsumer } from '../kafka/inventory-events.consumer';
+import { IdentityEventsConsumer } from '../kafka/identity-events.consumer';
 import { OrderProjectionConsumer } from '../kafka/order-projection.consumer';
 import { MalformedMessageError } from '../kafka/malformed-message.error';
 import { AttemptResult, RetryUpdate, decideRetry } from './retry-policy';
@@ -82,10 +83,16 @@ export class DeadLetterRetryWorker implements OnApplicationBootstrap, OnModuleDe
     paymentConsumer: PaymentEventsConsumer,
     inventoryConsumer: InventoryEventsConsumer,
     projectionConsumer: OrderProjectionConsumer,
+    identityConsumer: IdentityEventsConsumer,
     @Optional() @Inject(DEAD_LETTER_CLOCK) private readonly now: () => Date = () => new Date(),
   ) {
     this.settings = config.getOrThrow<DeadLetterConfig>('deadLetter');
-    this.inboundHandlers = [paymentConsumer, inventoryConsumer, projectionConsumer];
+    this.inboundHandlers = [
+      paymentConsumer,
+      inventoryConsumer,
+      projectionConsumer,
+      identityConsumer,
+    ];
   }
 
   /** Schedules the first cycle after one interval. Never blocks startup. */

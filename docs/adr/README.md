@@ -22,3 +22,4 @@ requires (Documentation Standards).
 | [0004](0004-read-model-projection-consistency.md) | Read-model projection: order-independent, idempotent and deterministic | Accepted |
 | [0005](0005-dead-letter-retry.md) | Dead-letter retry: per-row transactions with SKIP LOCKED and a self-rescheduling worker | Accepted |
 | [0006](0006-order-joins-payment-and-stock-outcomes.md) | Orders joins the payment and stock outcomes (choreographed saga with a join) | Accepted |
+| [0007](0007-customers-from-identity-events.md) | Customers are created from Identity's user-registered events | Accepted |

@@ -15,6 +15,7 @@ import { ConsumedMessageDeadLetterRepository } from '../../../src/repositories/c
 import { PaymentEventsConsumer } from '../../../src/infra/kafka/payment-events.consumer';
 import { InventoryEventsConsumer } from '../../../src/infra/kafka/inventory-events.consumer';
 import { OrderProjectionConsumer } from '../../../src/infra/kafka/order-projection.consumer';
+import { IdentityEventsConsumer } from '../../../src/infra/kafka/identity-events.consumer';
 import { MalformedMessageError } from '../../../src/infra/kafka/malformed-message.error';
 
 const SETTINGS: DeadLetterConfig = {
@@ -110,6 +111,7 @@ describe('DeadLetterRetryWorker', () => {
   let paymentProcess: jest.Mock;
   let inventoryProcess: jest.Mock;
   let projectionProcess: jest.Mock;
+  let identityProcess: jest.Mock;
   let worker: DeadLetterRetryWorker;
   let clock: Date;
 
@@ -134,6 +136,10 @@ describe('DeadLetterRetryWorker', () => {
         topics: ['orders.order-placed', 'orders.order-confirmed', 'orders.order-cancelled'],
         process: projectionProcess,
       } as unknown as OrderProjectionConsumer,
+      {
+        topics: ['identity.user-registered'],
+        process: identityProcess,
+      } as unknown as IdentityEventsConsumer,
       () => clock,
     );
   }
@@ -151,6 +157,7 @@ describe('DeadLetterRetryWorker', () => {
     paymentProcess = jest.fn().mockResolvedValue(undefined);
     inventoryProcess = jest.fn().mockResolvedValue(undefined);
     projectionProcess = jest.fn().mockResolvedValue(undefined);
+    identityProcess = jest.fn().mockResolvedValue(undefined);
     worker = build();
   });
 
@@ -324,6 +331,18 @@ describe('DeadLetterRetryWorker', () => {
       );
       expect(paymentProcess).not.toHaveBeenCalled();
       expect(projectionProcess).not.toHaveBeenCalled();
+      expect(update).toMatchObject({ status: DeadLetterStatus.RESOLVED, retryCount: 1 });
+    });
+
+    it('should re-handle an identity.* row through the identity consumer and resolve it', async () => {
+      const update = await runOne(inboundRow({ topic: 'identity.user-registered' }));
+
+      expect(identityProcess).toHaveBeenCalledWith(
+        'identity.user-registered',
+        Buffer.from('{"eventId":"evt-9"}', 'utf8'),
+      );
+      expect(paymentProcess).not.toHaveBeenCalled();
+      expect(inventoryProcess).not.toHaveBeenCalled();
       expect(update).toMatchObject({ status: DeadLetterStatus.RESOLVED, retryCount: 1 });
     });
 

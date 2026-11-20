@@ -82,10 +82,14 @@ export class OutcomeWriteFlow {
     inbound: InboundEventRef,
     apply: (order: Order) => OutcomeApplication,
   ): Promise<OutcomeRecord> {
-    const order = await this.orderRepository.findById(inbound.orderId);
+    const orderId = inbound.orderId;
+    if (orderId === undefined) {
+      throw new Error(`outcome event has no orderId; ${describeInboundEvent(inbound)}`);
+    }
+    const order = await this.orderRepository.findById(orderId);
     if (!order) {
       throw new OrderNotFoundForOutcomeError(
-        inbound.orderId,
+        orderId,
         inbound.topic,
         inbound.paymentId ?? inbound.reservationId,
       );

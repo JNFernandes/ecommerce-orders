@@ -30,7 +30,13 @@ export interface KafkaConfig {
    */
   inventoryGroupId: string;
   /**
-   * Whether the Kafka consumers (payment events, inventory events and read-model projection)
+   * Consumer group id used by the identity (user registered) events consumer
+   * (`KAFKA_IDENTITY_GROUP_ID`, default `ecommerce-orders-identity-consumer`). Separate from the
+   * other groups: two kafkajs consumers with different subscriptions must not share a group.
+   */
+  identityGroupId: string;
+  /**
+   * Whether the Kafka consumers (payment, inventory and identity events, and read-model projection)
    * start on bootstrap (`KAFKA_CONSUMER_ENABLED`, default true).
    */
   consumerEnabled: boolean;
@@ -133,6 +139,7 @@ export default (): AppConfig => ({
     groupId: process.env.KAFKA_GROUP_ID ?? 'ecommerce-orders-consumer',
     projectionGroupId: process.env.KAFKA_PROJECTION_GROUP_ID ?? 'ecommerce-orders-projection',
     inventoryGroupId: process.env.KAFKA_INVENTORY_GROUP_ID ?? 'ecommerce-orders-inventory-consumer',
+    identityGroupId: process.env.KAFKA_IDENTITY_GROUP_ID ?? 'ecommerce-orders-identity-consumer',
     consumerEnabled: process.env.KAFKA_CONSUMER_ENABLED !== 'false',
     maxAttempts: parseInt(process.env.PAYMENT_CONSUMER_MAX_ATTEMPTS ?? '5', 10),
     backoffInitialMs: parseInt(process.env.PAYMENT_CONSUMER_BACKOFF_INITIAL_MS ?? '1000', 10),

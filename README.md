@@ -73,7 +73,7 @@ See [`src/README.md`](src/README.md) for the folder layout.
 | `StockReserved` | `inventory.stock-reserved` | Consumed: confirms the order once the payment is also processed | Built |
 | `StockRejected` | `inventory.stock-rejected` | Consumed: cancels the order, stores the reason | Built |
 | `orders.*` (own events) | `orders.*` | Consumed: builds the read model (`order_views`) | Built |
-| `UserRegistered` | `identity.user-registered` | Consumed: creates the customer (see [Customers](#customers)) | Planned |
+| `UserRegistered` | `identity.user-registered` | Consumed: creates the customer (see [Customers](#customers)) | Implemented |
 
 Every event carries `eventId`, `occurredAt`, `aggregateId` and `version`. Payment and Inventory
 events reference the order by `orderId`; their `aggregateId` is the payment id or the
@@ -114,12 +114,13 @@ Principle VII): one customer per event, with the event's `customerId` as its id 
 - Creation is eventually consistent. An order placed before Orders has seen the customer's
   `identity.user-registered` is rejected with `404`, exactly like an order for an unknown
   customer; nothing is saved or published, and the client retries later.
-- The consumer will follow the same rules as the other consumers: dedupe by `eventId` in
-  `processed_events`, commit the offset after the save, retry with backoff, then dead-letter to
-  `consumed_message_dead_letters`. A customer that already exists (for example a seeded one) is
-  left as it is.
-- **Status:** the consumer is planned. Until it is built, customers come only from
-  `npm run seed:customers` (local development and tests).
+- The consumer is `IdentityEventsConsumer` (`src/infra/kafka/identity-events.consumer.ts`), group
+  `KAFKA_IDENTITY_GROUP_ID` (default `ecommerce-orders-identity-consumer`). It follows the same rules
+  as the other consumers: dedupe by `eventId` in `processed_events`, commit the offset after the
+  save, retry with backoff, then dead-letter to `consumed_message_dead_letters`. A customer that
+  already exists (for example a seeded one) is left as it is. Contract:
+  [docs/events/user-registered.md](docs/events/user-registered.md).
+- `npm run seed:customers` is legacy tooling, for local development and tests only.
 
 ## Endpoints
 

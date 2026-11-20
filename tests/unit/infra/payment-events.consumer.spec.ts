@@ -21,6 +21,7 @@ const KAFKA_CONFIG: KafkaConfig = {
   groupId: 'test-group',
   projectionGroupId: 'test-projection-group',
   inventoryGroupId: 'test-inventory-group',
+  identityGroupId: 'test-identity-group',
   consumerEnabled: true,
   maxAttempts: 3,
   backoffInitialMs: 1,
