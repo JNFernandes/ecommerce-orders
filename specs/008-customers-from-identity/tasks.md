@@ -65,7 +65,7 @@ JSDoc on public classes/methods; no `any`. After each phase run the quality gate
 ## Phase 7: Polish
 
 - [X] T032 Run `npm run build`, `npm run lint`, `npm run format:check`, `npm run test` and fix failures
-- [ ] T033 Walk through quickstart.md steps 1–5 against local infra
+- [X] T033 Walk through quickstart.md steps 1–5 against local infra
 
 ## Dependencies
 
