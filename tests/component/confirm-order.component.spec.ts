@@ -26,6 +26,8 @@ import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(240_000);
 
@@ -58,6 +60,8 @@ describe('Confirm Order — full write flow (component)', () => {
   let observerConsumer: Consumer;
   const observedMessages: Array<{ aggregateId: string }> = [];
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     postgresContainer = await new PostgreSqlContainer('postgres:16-alpine').start();
     kafkaContainer = await new KafkaContainer('confluentinc/cp-kafka:7.6.1').start();
@@ -68,6 +72,7 @@ describe('Confirm Order — full write flow (component)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -139,6 +144,7 @@ describe('Confirm Order — full write flow (component)', () => {
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }],
@@ -149,7 +155,9 @@ describe('Confirm Order — full write flow (component)', () => {
   it('should update the order status to CONFIRMED and emit OrderConfirmed to Kafka', async () => {
     const orderId = await placeOrder();
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ orderId, status: 'CONFIRMED' });
@@ -165,7 +173,7 @@ describe('Confirm Order — full write flow (component)', () => {
 
   it('should return 409 without touching Kafka when the order is already confirmed', async () => {
     const orderId = await placeOrder();
-    await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`).set(auth.headers);
 
     // Wait for the first confirmation's message to actually arrive before asserting
     // that the second (rejected) attempt doesn't produce a new one.
@@ -173,7 +181,9 @@ describe('Confirm Order — full write flow (component)', () => {
       expect(observedMessages.filter((m) => m.aggregateId === orderId)).toHaveLength(1);
     });
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(409);
     expect(observedMessages.filter((m) => m.aggregateId === orderId)).toHaveLength(1);
@@ -185,7 +195,9 @@ describe('Confirm Order — full write flow (component)', () => {
     const originalSend = producer.send.bind(producer);
     producer.send = jest.fn().mockRejectedValueOnce(new Error('simulated broker outage'));
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(200);
 

@@ -19,6 +19,8 @@ import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-let
 import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(180_000);
 
@@ -29,6 +31,8 @@ describe('POST /orders (integration)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication;
   let dataSource: DataSource;
+
+  const auth = withTestIdentity();
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
@@ -42,6 +46,7 @@ describe('POST /orders (integration)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: container.getHost(),
@@ -95,6 +100,7 @@ describe('POST /orders (integration)', () => {
   it('should return 201 and orderId for a valid payload', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 2, unitPrice: 29.99 }],
@@ -108,6 +114,7 @@ describe('POST /orders (integration)', () => {
   it('should save the order correctly to the write database', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-002', quantity: 3, unitPrice: 10 }],
@@ -125,6 +132,7 @@ describe('POST /orders (integration)', () => {
   it('should consolidate duplicate productId entries into one row', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [
@@ -144,6 +152,7 @@ describe('POST /orders (integration)', () => {
   it('should return 400 when customerId is missing', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({ items: [{ productId: 'prod-001', quantity: 1, unitPrice: 1 }] });
 
     expect(response.status).toBe(400);
@@ -153,6 +162,7 @@ describe('POST /orders (integration)', () => {
   it('should return 400 when quantity is invalid', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 0, unitPrice: 1 }],
@@ -165,6 +175,7 @@ describe('POST /orders (integration)', () => {
   it('should return 400 when unitPrice is invalid', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 0 }],
@@ -177,6 +188,7 @@ describe('POST /orders (integration)', () => {
   it('should return 400 when items array is empty', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({ customerId: EXISTING_CUSTOMER_ID, items: [] });
 
     expect(response.status).toBe(400);
@@ -186,6 +198,7 @@ describe('POST /orders (integration)', () => {
   it('should return 404 when customerId does not correspond to an existing customer', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: UNKNOWN_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 1 }],

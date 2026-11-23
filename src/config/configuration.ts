@@ -99,6 +99,24 @@ export interface CorsConfig {
   allowedOrigins: string[];
 }
 
+export interface AuthConfig {
+  /**
+   * URL of Identity's public key set (`IDENTITY_JWKS_URL`, default
+   * `http://localhost:3001/.well-known/jwks.json`). Fetched lazily on the first request, never at
+   * startup.
+   */
+  jwksUrl: string;
+  /**
+   * Expected `iss` claim (`JWT_ISSUER`). No default: the auth module refuses to start without it,
+   * so `configuration()` itself never throws.
+   */
+  issuer: string | undefined;
+  /** Expected `aud` claim (`JWT_AUDIENCE`). No default, required by the auth module. */
+  audience: string | undefined;
+  /** Clock skew allowed on `exp`, `nbf` and `iat`, in seconds (`JWT_CLOCK_TOLERANCE_SECONDS`, default 5). */
+  clockToleranceSeconds: number;
+}
+
 export interface AppConfig {
   port: number;
   cors: CorsConfig;
@@ -107,6 +125,7 @@ export interface AppConfig {
   readModel: ReadModelConfig;
   graphql: GraphqlConfig;
   deadLetter: DeadLetterConfig;
+  auth: AuthConfig;
 }
 
 /**
@@ -160,5 +179,11 @@ export default (): AppConfig => ({
     baseDelayMs: parseInt(process.env.DEAD_LETTER_BASE_DELAY_MS ?? '5000', 10),
     maxDelayMs: parseInt(process.env.DEAD_LETTER_MAX_DELAY_MS ?? '600000', 10),
     maxRetries: parseInt(process.env.DEAD_LETTER_MAX_RETRIES ?? '8', 10),
+  },
+  auth: {
+    jwksUrl: process.env.IDENTITY_JWKS_URL ?? 'http://localhost:3001/.well-known/jwks.json',
+    issuer: process.env.JWT_ISSUER,
+    audience: process.env.JWT_AUDIENCE,
+    clockToleranceSeconds: parseInt(process.env.JWT_CLOCK_TOLERANCE_SECONDS ?? '5', 10),
   },
 });

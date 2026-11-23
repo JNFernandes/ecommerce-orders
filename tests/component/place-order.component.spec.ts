@@ -25,6 +25,8 @@ import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-let
 import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(240_000);
 
@@ -59,6 +61,8 @@ describe('Place Order — full write flow (component)', () => {
   let observerConsumer: Consumer;
   const observedMessages: Array<{ aggregateId: string; totalAmount: number }> = [];
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     postgresContainer = await new PostgreSqlContainer('postgres:16-alpine').start();
     kafkaContainer = await new KafkaContainer('confluentinc/cp-kafka:7.6.1').start();
@@ -69,6 +73,7 @@ describe('Place Order — full write flow (component)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -143,6 +148,7 @@ describe('Place Order — full write flow (component)', () => {
   it('should save to DB and emit OrderPlaced to Kafka', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 2, unitPrice: 29.99 }],
@@ -165,6 +171,7 @@ describe('Place Order — full write flow (component)', () => {
   it('should reject an unknown customerId before any DB save or Kafka publish', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: UNKNOWN_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 1 }],
@@ -186,6 +193,7 @@ describe('Place Order — full write flow (component)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-999', quantity: 1, unitPrice: 5 }],

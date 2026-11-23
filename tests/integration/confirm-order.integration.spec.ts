@@ -20,6 +20,8 @@ import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { ConfirmOrderService } from '../../src/services/confirm-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(180_000);
 
@@ -30,6 +32,8 @@ describe('POST /orders/:orderId/confirm (integration)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication;
   let dataSource: DataSource;
+
+  const auth = withTestIdentity();
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
@@ -43,6 +47,7 @@ describe('POST /orders/:orderId/confirm (integration)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: container.getHost(),
@@ -96,6 +101,7 @@ describe('POST /orders/:orderId/confirm (integration)', () => {
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }],
@@ -106,7 +112,9 @@ describe('POST /orders/:orderId/confirm (integration)', () => {
   it('should confirm a PENDING order and return its CONFIRMED status', async () => {
     const orderId = await placeOrder();
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ orderId, status: 'CONFIRMED' });
@@ -116,22 +124,28 @@ describe('POST /orders/:orderId/confirm (integration)', () => {
   });
 
   it('should return 404 when the order does not exist', async () => {
-    const response = await request(app.getHttpServer()).post(`/orders/${UNKNOWN_ORDER_ID}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${UNKNOWN_ORDER_ID}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(404);
   });
 
   it('should return 400 when orderId is not a valid UUID', async () => {
-    const response = await request(app.getHttpServer()).post('/orders/not-a-uuid/confirm');
+    const response = await request(app.getHttpServer())
+      .post('/orders/not-a-uuid/confirm')
+      .set(auth.headers);
 
     expect(response.status).toBe(400);
   });
 
   it('should return 409 when the order is already confirmed', async () => {
     const orderId = await placeOrder();
-    await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`).set(auth.headers);
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(409);
   });
@@ -140,7 +154,9 @@ describe('POST /orders/:orderId/confirm (integration)', () => {
     const orderId = await placeOrder();
     await dataSource.query('UPDATE orders SET status = $1 WHERE id = $2', ['CANCELLED', orderId]);
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(409);
   });
@@ -152,7 +168,9 @@ describe('POST /orders/:orderId/confirm (integration)', () => {
       [orderId],
     );
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(auth.headers);
 
     expect(response.status).toBe(200);
     const rows = await dataSource.query(

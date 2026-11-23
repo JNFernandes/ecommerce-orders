@@ -37,6 +37,7 @@ import { OrdersResolver } from './controllers/orders.resolver';
 import { ListOrdersService } from './services/list-orders.service';
 import { GetOrderService } from './services/get-order.service';
 import { DeadLetterRetryWorker } from './infra/dead-letter/dead-letter-retry.worker';
+import { AuthModule } from './infra/auth/auth.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { DeadLetterRetryWorker } from './infra/dead-letter/dead-letter-retry.wor
       ConsumedMessageDeadLetterEntity,
     ]),
     CqrsModule.forRoot(),
+    AuthModule,
     KafkaModule,
     ReadModelModule,
     GraphQLModule.forRootAsync<ApolloDriverConfig>({

@@ -1,8 +1,8 @@
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
+import { setupSwagger } from './app.swagger';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
@@ -12,13 +12,7 @@ async function bootstrap(): Promise<void> {
   // dead-letter retry worker stop cleanly in production (tests close their apps explicitly).
   app.enableShutdownHooks();
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('ecommerce-orders')
-    .setDescription('Orders microservice — write path (REST) for placing orders')
-    .setVersion('1.0')
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api', app, document);
+  setupSwagger(app);
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('port') ?? 3000;

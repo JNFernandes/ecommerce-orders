@@ -41,6 +41,8 @@ import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
 import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { ApplyStockOutcomeService } from '../../src/services/apply-stock-outcome.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(180_000);
 
@@ -55,6 +57,8 @@ describe('Inventory outcome consumer (integration, real PostgreSQL)', () => {
   const producerSend = jest.fn().mockResolvedValue(undefined);
   const commitOffsets = jest.fn().mockResolvedValue(undefined);
   let nextOffset = 0;
+
+  const auth = withTestIdentity();
 
   beforeAll(async () => {
     process.env.KAFKA_CONSUMER_ENABLED = 'false';
@@ -82,6 +86,7 @@ describe('Inventory outcome consumer (integration, real PostgreSQL)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: container.getHost(),
@@ -159,6 +164,7 @@ describe('Inventory outcome consumer (integration, real PostgreSQL)', () => {
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }],

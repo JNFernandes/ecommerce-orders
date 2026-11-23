@@ -38,6 +38,8 @@ import { CancelOrderService } from '../../src/services/cancel-order.service';
 import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
 import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(180_000);
 
@@ -51,6 +53,8 @@ describe('Payment outcome consumer (integration)', () => {
   const producerSend = jest.fn().mockResolvedValue(undefined);
   const commitOffsets = jest.fn().mockResolvedValue(undefined);
   let nextOffset = 0;
+
+  const auth = withTestIdentity();
 
   beforeAll(async () => {
     process.env.KAFKA_CONSUMER_ENABLED = 'false';
@@ -77,6 +81,7 @@ describe('Payment outcome consumer (integration)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: container.getHost(),
@@ -151,6 +156,7 @@ describe('Payment outcome consumer (integration)', () => {
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(auth.headers)
       .send({
         customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }],

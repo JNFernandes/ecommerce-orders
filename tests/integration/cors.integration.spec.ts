@@ -10,6 +10,8 @@ import { configureApp } from '../../src/app.setup';
 import { buildGraphqlOptions } from '../../src/graphql/graphql.config';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { OrdersResolver } from '../../src/controllers/orders.resolver';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 const ALLOWED_ORIGIN = 'https://shop.example.com';
 const OTHER_ALLOWED_ORIGIN = 'http://localhost:5173';
@@ -32,6 +34,7 @@ async function buildApp(allowedOrigins: string | undefined): Promise<INestApplic
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration], ignoreEnvFile: true }),
+        AuthModule,
         CqrsModule.forRoot(),
         GraphQLModule.forRootAsync<ApolloDriverConfig>({
           driver: ApolloDriver,
@@ -64,8 +67,11 @@ function corsHeaderNames(headers: Record<string, unknown>): string[] {
   return Object.keys(headers).filter((name) => name.toLowerCase().startsWith('access-control-'));
 }
 
+/** Fake Identity for the whole file; REST calls send a token allowed on every route. */
+const auth = withTestIdentity();
+
 function restRequest(app: INestApplication, origin?: string): request.Test {
-  const req = request(app.getHttpServer()).post(`/orders/${ORDER_ID}/cancel`);
+  const req = request(app.getHttpServer()).post(`/orders/${ORDER_ID}/cancel`).set(auth.headers);
   return origin === undefined ? req : req.set('Origin', origin);
 }
 
