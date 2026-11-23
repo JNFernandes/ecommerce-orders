@@ -270,7 +270,8 @@ keys unavailable → `SERVICE_UNAVAILABLE`; CUSTOMER or ADMIN → same results a
 - [X] T074 [P] Apply plan "Open points" 1 to `specs/009-identity-token-auth/spec.md` FR-009: replace "honour Identity's max-age, fallback 10 minutes" and "the first load does not count" with the implemented behaviour (fixed 300 s max age; cooldown counted from any fetch, including the first), and align the matching Assumption ("Key cache freshness")
 - [X] T075 Keep `docs/events/` untouched (no event contract change) and run `npm run schema:generate`; confirm `git diff docs/schema.gql` is empty
 - [X] T076 Run the quality gate in order: `npm run build`, `npm run lint` (`--max-warnings 0`), `npm run format:check`, `npm run test` (component tests need Docker); fix every failure
-- [ ] T077 Walk through the manual steps of `specs/009-identity-token-auth/quickstart.md` against the local stack (ecommerce-infra + ecommerce-identity) and note the result
+- [X] T077 Walk through the manual steps of `specs/009-identity-token-auth/quickstart.md` against the local stack (ecommerce-infra + ecommerce-identity) and note the result
+  - **Result (2026-11-23)**: this branch's build on port 3010 against the local stack, with real Identity customer tokens (RS256, `kid`, `iss` `http://localhost:3001`, `aud` `ecommerce`). Steps 1, 3, 4, 5 (customer cases), 6 (customer `403`), 7, 8 and 9 pass. Step 1 simulated Identity down by pointing `IDENTITY_JWKS_URL` at a dead port. The admin cases (admin `403` on place, admin cancel of another customer's order, admin confirm) were not run live (no admin credentials available); they are covered by the integration and component suites for place, cancel and confirm with signed tokens. Found outside this story: the Docker Orders image on :3000 predates US-10 (no `identity.user-registered` consumer), so the two test customers were inserted by hand; rebuild the image after merge.
 
 ---
 
