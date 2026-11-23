@@ -202,9 +202,8 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .set(auth.headers)
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
       .send({
-        customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }],
       });
     expect(response.status).toBe(201);

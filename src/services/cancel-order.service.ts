@@ -13,7 +13,8 @@ export interface CancelOrderResult {
 }
 
 /**
- * Application-layer service that orchestrates cancelling an order: loads it, delegates
+ * Application-layer service that orchestrates cancelling an order: loads it, answers 404 when it
+ * is missing or not accessible to the requester (Order.isAccessibleBy, US-11), delegates
  * the PENDING-only business rule to Order.cancel(), persists the status change, and —
  * only after that save succeeds — publishes OrderCancelled to Kafka. A Kafka publish
  * failure is captured to the dead-letter table and never turns into a client-visible
@@ -31,7 +32,8 @@ export class CancelOrderService implements ICommandHandler<CancelOrderCommand, C
 
   async execute(command: CancelOrderCommand): Promise<CancelOrderResult> {
     const order = await this.orderRepository.findById(command.orderId);
-    if (!order) {
+    // Another customer's order answers exactly like a missing one, so callers cannot probe ids.
+    if (!order || !order.isAccessibleBy(command.requester)) {
       throw new NotFoundException('Order not found');
     }
 

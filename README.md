@@ -126,9 +126,12 @@ Principle VII): one customer per event, with the event's `customerId` as its id 
 
 | Method | Path | Description | Responses |
 |---|---|---|---|
-| `POST` | `/orders` | Place an order (`customerId`, `items[]`) | `201` `{ orderId }`, `400` invalid input, `404` unknown customer |
-| `POST` | `/orders/:orderId/cancel` | Cancel a `PENDING` order | `200`, `404` not found, `409` not `PENDING` |
-| `POST` | `/orders/:orderId/confirm` | Confirm a `PENDING` order manually (payment success does this automatically) | `200`, `404` not found, `409` not `PENDING` |
+| `POST` | `/orders` | Place an order for the caller (`items[]`; the customer is the token's `customerId`). Role `CUSTOMER` | `201` `{ orderId }`, `400` invalid input (a `customerId` in the body included), `404` unknown customer |
+| `POST` | `/orders/:orderId/cancel` | Cancel a `PENDING` order. `CUSTOMER` (own orders) or `ADMIN` (any order) | `200`, `404` not found (or another customer's order), `409` not `PENDING` |
+| `POST` | `/orders/:orderId/confirm` | Confirm a `PENDING` order manually (payment success does this automatically). Role `ADMIN` | `200`, `404` not found, `409` not `PENDING` |
+
+Every route needs `Authorization: Bearer <Identity access token>`: `401` without a valid token,
+`403` without an allowed role, `503` when Identity's keys cannot be loaded.
 
 Swagger UI is served at `http://localhost:3000/api` while the app is running. Story-level details
 are in [`docs/us-01-place-order.md`](docs/us-01-place-order.md),

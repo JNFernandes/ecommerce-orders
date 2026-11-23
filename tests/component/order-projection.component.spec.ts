@@ -199,9 +199,8 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .set(auth.headers)
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
       .send({
-        customerId: EXISTING_CUSTOMER_ID,
         items: [
           { productId: 'p-1', quantity: 3, unitPrice: 19.99 },
           { productId: 'p-2', quantity: 1, unitPrice: 5 },
@@ -226,7 +225,7 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
 
     const confirm = await request(app.getHttpServer())
       .post(`/orders/${orderId}/confirm`)
-      .set(auth.headers);
+      .set(await auth.adminHeaders());
     expect(confirm.status).toBe(200);
 
     const confirmed = await viewWithStatus(orderId, 'CONFIRMED');

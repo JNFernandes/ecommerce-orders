@@ -18,6 +18,12 @@ export interface TestIdentityHandle {
    * on every REST route. For suites that are not about access rules.
    */
   readonly headers: BearerHeader;
+  /** Header for a `CUSTOMER` token of this customer (who places orders as that customer). */
+  customerHeaders(customerId: string): Promise<BearerHeader>;
+  /** Header for an `ADMIN`-only token (no `customerId`). */
+  adminHeaders(): Promise<BearerHeader>;
+  /** Header for a token with both roles and this `customerId`. */
+  customerAdminHeaders(customerId: string): Promise<BearerHeader>;
 }
 
 /**
@@ -39,18 +45,31 @@ export function withTestIdentity(): TestIdentityHandle {
     await identity?.stop();
   });
 
+  const started = (): TestIdentity => {
+    if (identity === undefined) {
+      throw new Error('withTestIdentity: the fake Identity is not started yet');
+    }
+    return identity;
+  };
+
   return {
     get identity(): TestIdentity {
-      if (identity === undefined) {
-        throw new Error('withTestIdentity: the fake Identity is not started yet');
-      }
-      return identity;
+      return started();
     },
     get headers(): BearerHeader {
       if (headers === undefined) {
         throw new Error('withTestIdentity: the fake Identity is not started yet');
       }
       return headers;
+    },
+    async customerHeaders(customerId: string): Promise<BearerHeader> {
+      return bearer(await started().customerToken(customerId));
+    },
+    async adminHeaders(): Promise<BearerHeader> {
+      return bearer(await started().adminToken());
+    },
+    async customerAdminHeaders(customerId: string): Promise<BearerHeader> {
+      return bearer(await started().customerAdminToken(customerId));
     },
   };
 }

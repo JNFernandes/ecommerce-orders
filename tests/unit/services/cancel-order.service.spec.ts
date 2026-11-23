@@ -8,8 +8,13 @@ import { OrderRepository } from '../../../src/repositories/order.repository';
 import { OrderEventsProducer } from '../../../src/infra/kafka/order-events.producer';
 import { OrderDeadLetterRepository } from '../../../src/repositories/order-dead-letter.repository';
 import { OrderCancelled } from '../../../src/domain/events/order-cancelled.event';
+import { OrderRequester } from '../../../src/domain/order-requester';
 
 const CUSTOMER_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+const OTHER_CUSTOMER_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+const OWNER: OrderRequester = { customerId: CUSTOMER_ID, isAdmin: false };
+const OTHER_CUSTOMER: OrderRequester = { customerId: OTHER_CUSTOMER_ID, isAdmin: false };
+const ADMIN: OrderRequester = { customerId: null, isAdmin: true };
 
 function buildPendingOrder(): Order {
   const order = Order.place(CUSTOMER_ID, [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }]);
@@ -60,7 +65,7 @@ describe('CancelOrderService', () => {
   it('should cancel a PENDING order and return CANCELLED status', async () => {
     const { service } = buildService();
 
-    const result = await service.execute(new CancelOrderCommand('any-order-id'));
+    const result = await service.execute(new CancelOrderCommand('any-order-id', OWNER));
 
     expect(result.status).toBe(OrderStatus.CANCELLED);
   });
@@ -75,7 +80,7 @@ describe('CancelOrderService', () => {
       callOrder.push('publish');
     });
 
-    await service.execute(new CancelOrderCommand('any-order-id'));
+    await service.execute(new CancelOrderCommand('any-order-id', OWNER));
 
     expect(callOrder).toEqual(['updateStatus', 'publish']);
   });
@@ -83,7 +88,7 @@ describe('CancelOrderService', () => {
   it('should throw NotFoundException when the order does not exist', async () => {
     const { service, orderRepository } = buildService({ order: null });
 
-    await expect(service.execute(new CancelOrderCommand('unknown-id'))).rejects.toThrow(
+    await expect(service.execute(new CancelOrderCommand('unknown-id', OWNER))).rejects.toThrow(
       NotFoundException,
     );
     expect(orderRepository.updateStatus).not.toHaveBeenCalled();
@@ -94,7 +99,7 @@ describe('CancelOrderService', () => {
     alreadyCancelled.cancel();
     const { service, orderRepository } = buildService({ order: alreadyCancelled });
 
-    await expect(service.execute(new CancelOrderCommand('any-order-id'))).rejects.toThrow(
+    await expect(service.execute(new CancelOrderCommand('any-order-id', OWNER))).rejects.toThrow(
       OrderCancellationError,
     );
     expect(orderRepository.updateStatus).not.toHaveBeenCalled();
@@ -105,7 +110,7 @@ describe('CancelOrderService', () => {
       updateStatusError: new Error('db down'),
     });
 
-    await expect(service.execute(new CancelOrderCommand('any-order-id'))).rejects.toThrow(
+    await expect(service.execute(new CancelOrderCommand('any-order-id', OWNER))).rejects.toThrow(
       'db down',
     );
     expect(orderEventsProducer.publishOrderCancelled).not.toHaveBeenCalled();
@@ -116,7 +121,7 @@ describe('CancelOrderService', () => {
       publishError: new Error('kafka unreachable'),
     });
 
-    const result = await service.execute(new CancelOrderCommand('any-order-id'));
+    const result = await service.execute(new CancelOrderCommand('any-order-id', OWNER));
 
     expect(result.status).toBe(OrderStatus.CANCELLED);
     expect(orderDeadLetterRepository.recordFailure).toHaveBeenCalledTimes(1);
@@ -125,10 +130,58 @@ describe('CancelOrderService', () => {
   it('should publish OrderCancelled without a reason for a REST cancellation', async () => {
     const { service, orderEventsProducer } = buildService();
 
-    await service.execute(new CancelOrderCommand('any-order-id'));
+    await service.execute(new CancelOrderCommand('any-order-id', OWNER));
 
     const published = (orderEventsProducer.publishOrderCancelled as jest.Mock).mock
       .calls[0][0] as OrderCancelled;
     expect(JSON.parse(JSON.stringify(published))).not.toHaveProperty('reason');
+  });
+
+  describe('ownership (US-11)', () => {
+    it("should answer another customer's order with the same NotFoundException as a missing one", async () => {
+      const missing = buildService({ order: null });
+      const notMine = buildService();
+
+      const missingError = await missing.service
+        .execute(new CancelOrderCommand('unknown-id', OTHER_CUSTOMER))
+        .catch((error: unknown) => error);
+      const notMineError = await notMine.service
+        .execute(new CancelOrderCommand('any-order-id', OTHER_CUSTOMER))
+        .catch((error: unknown) => error);
+
+      expect(notMineError).toBeInstanceOf(NotFoundException);
+      expect((notMineError as NotFoundException).getResponse()).toEqual(
+        (missingError as NotFoundException).getResponse(),
+      );
+      expect(notMine.orderRepository.updateStatus).not.toHaveBeenCalled();
+      expect(notMine.orderEventsProducer.publishOrderCancelled).not.toHaveBeenCalled();
+    });
+
+    it('should let the owner cancel their order', async () => {
+      const { service, orderEventsProducer } = buildService();
+
+      const result = await service.execute(new CancelOrderCommand('any-order-id', OWNER));
+
+      expect(result.status).toBe(OrderStatus.CANCELLED);
+      expect(orderEventsProducer.publishOrderCancelled).toHaveBeenCalledTimes(1);
+    });
+
+    it("should let an admin cancel any customer's order", async () => {
+      const { service } = buildService();
+
+      const result = await service.execute(new CancelOrderCommand('any-order-id', ADMIN));
+
+      expect(result.status).toBe(OrderStatus.CANCELLED);
+    });
+
+    it('should still raise OrderCancellationError for the owner of a non-PENDING order', async () => {
+      const alreadyCancelled = buildPendingOrder();
+      alreadyCancelled.cancel();
+      const { service } = buildService({ order: alreadyCancelled });
+
+      await expect(service.execute(new CancelOrderCommand('any-order-id', OWNER))).rejects.toThrow(
+        OrderCancellationError,
+      );
+    });
   });
 });

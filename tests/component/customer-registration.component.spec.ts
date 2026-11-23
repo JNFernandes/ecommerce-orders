@@ -188,8 +188,8 @@ describe('Customer registration — identity.user-registered → customers (comp
 
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .set(auth.headers)
-      .send({ customerId, items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }] });
+      .set(await auth.customerHeaders(customerId))
+      .send({ items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }] });
     expect(response.status).toBe(201);
   });
 

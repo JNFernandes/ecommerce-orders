@@ -69,9 +69,12 @@ Content-Type: application/json
 ```
 
 ### Request body
+
+> Superseded by US-11 (`specs/009-identity-token-auth/`): the customer is the caller, taken from
+> the access token's `customerId`. The body holds only `items`; a `customerId` in it is a `400`.
+
 ```json
 {
-  "customerId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "items": [
     {
       "productId": "prod-001",

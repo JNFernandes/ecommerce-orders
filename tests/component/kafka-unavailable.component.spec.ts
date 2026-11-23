@@ -282,8 +282,8 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
     const started = Date.now();
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .set(auth.headers)
-      .send({ customerId: CUSTOMER_ID, items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
+      .set(await auth.customerHeaders(CUSTOMER_ID))
+      .send({ items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
     const elapsedMs = Date.now() - started;
 
     expect(response.status).toBe(201);

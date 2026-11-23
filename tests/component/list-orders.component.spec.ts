@@ -189,8 +189,8 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
   async function placeOrder(customerId: string, unitPrice: number): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .set(auth.headers)
-      .send({ customerId, items: [{ productId: 'p-1', quantity: 2, unitPrice }] });
+      .set(await auth.customerHeaders(customerId))
+      .send({ items: [{ productId: 'p-1', quantity: 2, unitPrice }] });
     expect(response.status).toBe(201);
     return response.body.orderId;
   }
@@ -232,7 +232,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
 
     const confirm = await request(app.getHttpServer())
       .post(`/orders/${first}/confirm`)
-      .set(auth.headers);
+      .set(await auth.adminHeaders());
     expect(confirm.status).toBe(200);
 
     await waitFor(async () => {
@@ -248,7 +248,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
     const toCancel = await placeOrder(CUSTOMER_A, 7);
     const cancel = await request(app.getHttpServer())
       .post(`/orders/${toCancel}/cancel`)
-      .set(auth.headers);
+      .set(await auth.adminHeaders());
     expect(cancel.status).toBe(200);
 
     await waitFor(async () => {
@@ -294,7 +294,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
 
     const confirm = await request(app.getHttpServer())
       .post(`/orders/${orderId}/confirm`)
-      .set(auth.headers);
+      .set(await auth.adminHeaders());
     expect(confirm.status).toBe(200);
 
     await waitFor(async () => {

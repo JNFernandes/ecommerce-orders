@@ -222,8 +222,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .set(auth.headers)
-      .send({ customerId: CUSTOMER_ID, items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
+      .set(await auth.customerHeaders(CUSTOMER_ID))
+      .send({ items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
     expect(response.status).toBe(201);
     const orderId = (response.body as { orderId: string }).orderId;
 
@@ -249,8 +249,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .set(auth.headers)
-      .send({ customerId: CUSTOMER_ID, items: [{ productId: 'p-2', quantity: 2, unitPrice: 5 }] });
+      .set(await auth.customerHeaders(CUSTOMER_ID))
+      .send({ items: [{ productId: 'p-2', quantity: 2, unitPrice: 5 }] });
     expect(response.status).toBe(201);
     return (response.body as { orderId: string }).orderId;
   }
