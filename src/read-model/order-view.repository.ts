@@ -77,6 +77,24 @@ export class OrderViewRepository {
   }
 
   /**
+   * Loads the view of `orderId` for a read query, optionally only when it belongs to
+   * `customerId` (one query on `{ _id, customerId }`, so another owner's order and an unknown id
+   * both give null). The projection keeps using {@link findById}.
+   *
+   * @throws ReadModelUnavailableError when MongoDB is unreachable.
+   */
+  async findOne(orderId: string, customerId?: string): Promise<OrderView | null> {
+    const query: Record<string, string> = { _id: orderId };
+    if (customerId !== undefined) {
+      query.customerId = customerId;
+    }
+    const document = await this.guard(() =>
+      this.model.findOne(query).lean<StoredDocument>().exec(),
+    );
+    return document ? toView(document) : null;
+  }
+
+  /**
    * Creates the view at revision 1.
    *
    * @throws OrderViewConcurrencyError if another writer created it first.

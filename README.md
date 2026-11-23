@@ -158,7 +158,7 @@ request and starts even when Identity is down. Details: [ADR 0008](docs/adr/0008
 | `POST /orders` | `CUSTOMER` (a token with a `customerId`); the order is placed for that customer |
 | `POST /orders/:orderId/cancel` | `CUSTOMER` for their own orders, `ADMIN` for any order |
 | `POST /orders/:orderId/confirm` | `ADMIN` |
-| GraphQL `orders`, `order` | `CUSTOMER` or `ADMIN` |
+| GraphQL `orders`, `order` | `CUSTOMER` (their own orders only) or `ADMIN` (every order) |
 | Swagger (`/api`, `/api-json`) | anyone |
 
 `CUSTOMER` counts only when the token carries a `customerId`. Answers:
@@ -170,8 +170,8 @@ request and starts even when Identity is down. Details: [ADR 0008](docs/adr/0008
 | `404` | — | Unknown order, **or another customer's order** (the two cannot be told apart) |
 | `503` | `SERVICE_UNAVAILABLE` | Identity's keys could not be loaded yet; retry later |
 
-GraphQL errors keep HTTP status `200`; an auth failure there has no `data`. **GraphQL results are
-not scoped to the caller yet**: any `CUSTOMER` can read every order until US-12.
+GraphQL errors keep HTTP status `200`; an auth failure there has no `data`. GraphQL results are
+scoped to the caller (US-12), see [Who sees what](#who-sees-what).
 
 In Swagger UI, use **Authorize** and paste the token. Tokens are never logged.
 
@@ -190,6 +190,31 @@ introspection and the sandbox are off. The schema is committed in
 `order(orderId: ID!): Order` returns one order by id (any letter case), or `null` when no order
 has that id. A just-placed order may briefly return `null` until it has been projected. "Not
 found" is **not** an error: the response has no `errors` entry.
+
+### Who sees what
+
+Both queries are scoped to the caller's token (US-12). The scope is applied in the query
+handlers, so `status`, ordering, `limit`/`offset`, `totalCount` and `hasNextPage` all work
+inside it.
+
+| Caller | `orders(...)` | `order(orderId)` |
+|---|---|---|
+| `ADMIN` (with or without a `customerId`) | every order; `customerId` filters normally | any order, `null` if unknown |
+| `CUSTOMER` A | only A's orders; `customerId: A` is the same as leaving it out | A's order; `null` otherwise |
+| `CUSTOMER` A with `customerId: B` | empty page (`items: []`, `totalCount: 0`), no error | — |
+| neither (e.g. `CUSTOMER` without a `customerId`) | `FORBIDDEN` | `FORBIDDEN` |
+
+Another customer's order and an unknown id give the same response, `{"data":{"order":null}}`,
+so a customer cannot learn whether someone else's order exists. For example, with a token of
+customer A:
+
+```graphql
+# Only A's orders, even without a customerId argument
+{ orders(status: PENDING) { totalCount items { orderId customerId status } } }
+
+# Someone else's id: { "orders": { "totalCount": 0, "hasNextPage": false, "items": [] } }
+{ orders(customerId: "7c9e6679-7425-40de-944b-e07fc1f90ae7") { totalCount hasNextPage items { orderId } } }
+```
 
 ### Example GraphQL queries
 
@@ -211,7 +236,7 @@ Cancelled orders, with the reason:
 { orders(status: CANCELLED) { totalCount items { orderId cancelledAt cancellationReason } } }
 ```
 
-One customer's orders, second page of 10:
+One customer's orders, second page of 10 (an admin; a customer only gets their own):
 
 ```graphql
 {

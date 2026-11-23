@@ -76,5 +76,11 @@ export const OrderViewSchema = SchemaFactory.createForClass(OrderViewDocument);
 // so filtering and sorting are fully index-backed. Created by OrderViewRepository.ensureIndexes()
 // once the connection is up (autoIndex is off).
 OrderViewSchema.index({ customerId: 1, placedAt: -1, _id: -1 }, { name: 'customerId_placedAt' });
+// Owner + status (US-12): a customer's list is always scoped to their id, so a status filter on
+// top of it needs both keys to stay index-backed.
+OrderViewSchema.index(
+  { customerId: 1, status: 1, placedAt: -1, _id: -1 },
+  { name: 'customerId_status_placedAt' },
+);
 OrderViewSchema.index({ status: 1, placedAt: -1, _id: -1 }, { name: 'status_placedAt' });
 OrderViewSchema.index({ placedAt: -1, _id: -1 }, { name: 'placedAt' });

@@ -192,7 +192,9 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
   async function listOrders(args = 'limit: 10'): Promise<OrdersPage> {
     const response = await request(app.getHttpServer())
       .post('/graphql')
-      .set(await auth.customerHeaders(CUSTOMER_A))
+      // Admin: this suite checks listing and filtering across customers; scoping is covered by
+      // graphql-owner-scope.component.spec.ts (US-12).
+      .set(await auth.adminHeaders())
       .send({
         query: `{ orders(${args}) { totalCount hasNextPage items {
           orderId customerId status totalAmount placedAt confirmedAt cancelledAt
