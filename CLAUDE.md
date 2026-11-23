@@ -84,8 +84,12 @@ warning (`--max-warnings 0`), or a formatting violation.
 - GraphQL: the token is verified once in the context (`src/graphql/graphql-context.ts`);
   `graphqlAuthPlugin` rejects operations without a caller (`UNAUTHENTICATED` /
   `SERVICE_UNAVAILABLE`, no data, HTTP 200); `RolesGuard` answers `FORBIDDEN`. Use
-  `graphqlModule()` (`src/graphql/graphql.config.ts`) to mount GraphQL. Results are not scoped
-  to the caller until US-12.
+  `graphqlModule()` (`src/graphql/graphql.config.ts`) to mount GraphQL.
+- GraphQL owner scoping (US-12, `specs/010-graphql-owner-scope/`): resolvers build
+  `OrderReadScope.forCaller(@CurrentUser())` (`src/queries/order-read-scope.ts`: ADMIN → all,
+  CUSTOMER → own, neither → `ReadScopeForbiddenError` → `FORBIDDEN`) and pass it as the required
+  first arg of every order query; handlers apply it (`scopeOrderFilter`, `findOne(orderId,
+  customerId?)`), never resolvers. Another customer's id → empty page / `null`, never an error.
 - Never log or echo a token, even truncated; log the `AccessTokenError.category` only.
 - Never fetch the JWKS at startup, in a module factory or a lifecycle hook (lazy, single flight,
   60 s cooldown, 300 s cache, last good keys kept when a refresh fails).

@@ -34,13 +34,30 @@ checks that its values match the write model's `OrderStatus`.
 
 | Name | Keys | Serves |
 |---|---|---|
-| `customerId_placedAt` | `{ customerId: 1, placedAt: -1, _id: -1 }` | `orders(customerId: …)` |
+| `customerId_placedAt` | `{ customerId: 1, placedAt: -1, _id: -1 }` | `orders(customerId: …)`, and every customer's own list |
+| `customerId_status_placedAt` | `{ customerId: 1, status: 1, placedAt: -1, _id: -1 }` | a customer's list filtered by `status` (US-12) |
 | `status_placedAt` | `{ status: 1, placedAt: -1, _id: -1 }` | `orders(status: …)` |
 | `placedAt` | `{ placedAt: -1, _id: -1 }` | `orders` without filters |
 
 Declared on the schema and created by `OrderViewRepository.ensureIndexes()` every time the
 connection is established (`autoIndex` is off so index builds never race the lazy connection).
 The list query sorts by `placedAt` desc then `_id` desc, so views without `placedAt` come last.
+
+## Owner scoping (US-12)
+
+Every read query carries an `OrderReadScope` built from the caller's token
+(`src/queries/order-read-scope.ts`): `ALL` for an `ADMIN`, `CUSTOMER(id)` for a customer, and
+`FORBIDDEN` when the caller has neither. The query handlers apply it before touching MongoDB:
+
+- `orders`: the pure `scopeOrderFilter` (`src/read-model/order-view-scope.ts`) narrows the filter
+  to the owner. A customer filtering by another customer's id gets an empty page without a
+  database call. The same filter drives the page and the count, so `totalCount` and
+  `hasNextPage` only cover the caller's orders.
+- `order`: `OrderViewRepository.findOne(orderId, customerId?)` matches `{ _id, customerId }` in
+  one query, so another customer's order and an unknown id are both `null`.
+
+Ids are compared lowercased. This is the read-side mirror of `Order.isAccessibleBy`; the read
+model still never imports `src/domain`.
 
 ## Document shape: `order_views`
 
