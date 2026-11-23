@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { GraphQLModule } from '@nestjs/graphql';
-import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -32,7 +30,7 @@ import { CreateCustomerService } from './services/create-customer.service';
 import { OrderProjectionConsumer } from './infra/kafka/order-projection.consumer';
 import { OrdersController } from './controllers/orders.controller';
 import { ReadModelModule } from './read-model/read-model.module';
-import { buildGraphqlOptions } from './graphql/graphql.config';
+import { graphqlModule } from './graphql/graphql.config';
 import { OrdersResolver } from './controllers/orders.resolver';
 import { ListOrdersService } from './services/list-orders.service';
 import { GetOrderService } from './services/get-order.service';
@@ -62,11 +60,7 @@ import { AuthModule } from './infra/auth/auth.module';
     AuthModule,
     KafkaModule,
     ReadModelModule,
-    GraphQLModule.forRootAsync<ApolloDriverConfig>({
-      driver: ApolloDriver,
-      inject: [ConfigService],
-      useFactory: buildGraphqlOptions,
-    }),
+    graphqlModule(),
   ],
   controllers: [OrdersController],
   providers: [

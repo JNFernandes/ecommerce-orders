@@ -3,17 +3,16 @@ import {
   ExecutionContext,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { Request } from 'express';
 import { AccessTokenClaims } from '../../infra/auth/access-token-claims';
-import './request-user';
+import { callerOf } from './caller';
 
 /**
- * Reads the verified caller for a handler. The only way handlers get user data. Throws a 500 if
- * no caller is attached, which means the auth guard did not run (a wiring bug).
+ * Reads the verified caller for a REST handler or a GraphQL resolver. The only way handlers get
+ * user data. Throws a 500 if no caller is attached, which means the auth guard did not run (a
+ * wiring bug).
  */
 export function currentUserFactory(_data: unknown, context: ExecutionContext): AccessTokenClaims {
-  const user =
-    context.getType() === 'http' ? context.switchToHttp().getRequest<Request>().user : undefined;
+  const user = callerOf(context);
   if (user === undefined) {
     throw new InternalServerErrorException();
   }

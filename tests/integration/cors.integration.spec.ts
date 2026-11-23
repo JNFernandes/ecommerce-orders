@@ -1,13 +1,11 @@
 import { INestApplication } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { CommandBus, CqrsModule } from '@nestjs/cqrs';
-import { GraphQLModule } from '@nestjs/graphql';
-import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import configuration from '../../src/config/configuration';
 import { configureApp } from '../../src/app.setup';
-import { buildGraphqlOptions } from '../../src/graphql/graphql.config';
+import { graphqlModule } from '../../src/graphql/graphql.config';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { OrdersResolver } from '../../src/controllers/orders.resolver';
 import { AuthModule } from '../../src/infra/auth/auth.module';
@@ -36,11 +34,7 @@ async function buildApp(allowedOrigins: string | undefined): Promise<INestApplic
         ConfigModule.forRoot({ isGlobal: true, load: [configuration], ignoreEnvFile: true }),
         AuthModule,
         CqrsModule.forRoot(),
-        GraphQLModule.forRootAsync<ApolloDriverConfig>({
-          driver: ApolloDriver,
-          inject: [ConfigService],
-          useFactory: buildGraphqlOptions,
-        }),
+        graphqlModule(),
       ],
       controllers: [OrdersController],
       providers: [OrdersResolver],
@@ -78,6 +72,7 @@ function restRequest(app: INestApplication, origin?: string): request.Test {
 function graphqlRequest(app: INestApplication, origin: string): request.Test {
   return request(app.getHttpServer())
     .post('/graphql')
+    .set(auth.headers)
     .set('Origin', origin)
     .set('Content-Type', 'application/json')
     .send({ query: '{ __typename }' });

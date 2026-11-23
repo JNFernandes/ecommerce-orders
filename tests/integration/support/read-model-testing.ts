@@ -1,13 +1,11 @@
 import { INestApplication } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
-import { GraphQLModule } from '@nestjs/graphql';
-import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MongooseModule } from '@nestjs/mongoose';
 import configuration from '../../../src/config/configuration';
 import { configureApp } from '../../../src/app.setup';
-import { buildGraphqlOptions } from '../../../src/graphql/graphql.config';
+import { graphqlModule } from '../../../src/graphql/graphql.config';
 import { OrdersResolver } from '../../../src/controllers/orders.resolver';
 import { ListOrdersService } from '../../../src/services/list-orders.service';
 import { GetOrderService } from '../../../src/services/get-order.service';
@@ -50,8 +48,9 @@ export async function buildReadModelTestingModule(
 
 /**
  * Builds and initialises a Nest app serving the GraphQL read path against MongoDB at `uri`:
- * ConfigModule, CqrsModule, GraphQLModule (the app's own options factory), the read model,
- * OrdersResolver and ListOrdersService — no Kafka, no PostgreSQL. Uses `configureApp` so
+ * ConfigModule, CqrsModule, the app's own GraphQL module (with `AuthModule`, so callers need a
+ * token: start a `TestIdentity` first), the read model, OrdersResolver and the query handlers —
+ * no Kafka, no PostgreSQL. Uses `configureApp` so
  * validation behaves exactly as in production.
  */
 export async function buildGraphqlTestingApp(uri: string): Promise<INestApplication> {
@@ -59,11 +58,7 @@ export async function buildGraphqlTestingApp(uri: string): Promise<INestApplicat
     imports: [
       ConfigModule.forRoot({ isGlobal: true, load: [configuration], ignoreEnvFile: true }),
       CqrsModule.forRoot(),
-      GraphQLModule.forRootAsync<ApolloDriverConfig>({
-        driver: ApolloDriver,
-        inject: [ConfigService],
-        useFactory: buildGraphqlOptions,
-      }),
+      graphqlModule(),
       MongooseModule.forRoot(uri, {
         bufferCommands: false,
         autoIndex: false,

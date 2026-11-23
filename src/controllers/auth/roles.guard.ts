@@ -1,16 +1,18 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
+import { GqlContextType } from '@nestjs/graphql';
+import { forbiddenError } from '../../graphql/graphql-auth.errors';
 import { effectiveRoles } from '../../infra/auth/access-token-claims';
 import { Role } from '../../infra/auth/role.enum';
+import { callerOf } from './caller';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { ROLES_KEY } from './roles.decorator';
-import './request-user';
 
 /**
  * Global guard that runs after `JwtAuthGuard`: lets a request through when the caller's effective
- * roles (research R10) include one of the route's `@Roles`, else answers 403. `@Public` routes and
- * routes without role metadata pass here; the startup route policy check rejects the latter.
+ * roles (research R10) include one of the route's `@Roles`, else answers 403 on REST and a
+ * `FORBIDDEN` error on GraphQL. `@Public` routes and routes without role metadata pass here; the
+ * startup route policy check rejects the latter. Other transports pass through.
  */
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -23,14 +25,15 @@ export class RolesGuard implements CanActivate {
       return true;
     }
     const required = this.reflector.getAllAndOverride<Role[] | undefined>(ROLES_KEY, targets);
-    if (required === undefined || context.getType() !== 'http') {
+    const type = context.getType<GqlContextType>();
+    if (required === undefined || (type !== 'http' && type !== 'graphql')) {
       return true;
     }
-    const user = context.switchToHttp().getRequest<Request>().user;
+    const user = callerOf(context);
     const roles = user === undefined ? [] : effectiveRoles(user);
     if (roles.some((role) => required.includes(role))) {
       return true;
     }
-    throw new ForbiddenException();
+    throw type === 'graphql' ? forbiddenError() : new ForbiddenException();
   }
 }

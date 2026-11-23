@@ -2,6 +2,8 @@ import { BadRequestException } from '@nestjs/common';
 import { GraphQLError } from 'graphql';
 import { GraphQLUserInputFilter } from '../../../src/graphql/graphql-user-input.filter';
 import { ReadModelUnavailableError } from '../../../src/read-model/errors';
+import { authenticationError, forbiddenError } from '../../../src/graphql/graphql-auth.errors';
+import { AccessTokenError } from '../../../src/infra/auth/access-token.error';
 
 function caught(exception: unknown): unknown {
   try {
@@ -48,6 +50,17 @@ describe('GraphQLUserInputFilter', () => {
     expect(error.extensions.code).toBe('SERVICE_UNAVAILABLE');
     expect(error.message).toBe('Order data is temporarily unavailable, please retry');
     expect(JSON.stringify(error.toJSON())).not.toMatch(/Authentication|mongodb|pass/);
+  });
+
+  it.each([
+    ['UNAUTHENTICATED', authenticationError(null)],
+    ['SERVICE_UNAVAILABLE', authenticationError(new AccessTokenError('KEYS_UNAVAILABLE', 'fetch'))],
+    ['FORBIDDEN', forbiddenError()],
+  ])('should let the auth %s GraphQL error through unchanged', (code, error) => {
+    const thrown = caught(error) as GraphQLError;
+
+    expect(thrown).toBe(error);
+    expect(thrown.extensions.code).toBe(code);
   });
 
   it('should rethrow any other error unchanged', () => {

@@ -8,6 +8,8 @@ import { GetOrderQuery } from '../../../src/queries/get-order.query';
 import { OrderType } from '../../../src/dto/graphql/order.type';
 import { OrderView } from '../../../src/read-model/order-view';
 import { OrderViewStatus } from '../../../src/read-model/order-view-status.enum';
+import { ROLES_KEY } from '../../../src/controllers/auth/roles.decorator';
+import { Role } from '../../../src/infra/auth/role.enum';
 
 const VIEW: OrderView = {
   orderId: 'b3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
@@ -131,5 +133,11 @@ describe('OrdersResolver.order', () => {
     expect(order).toBeNull();
     expect(fromView).not.toHaveBeenCalled();
     fromView.mockRestore();
+  });
+});
+
+describe('OrdersResolver access rule', () => {
+  it('should be open to CUSTOMER and ADMIN callers at class level (not scoped until US-12)', () => {
+    expect(Reflect.getMetadata(ROLES_KEY, OrdersResolver)).toEqual([Role.CUSTOMER, Role.ADMIN]);
   });
 });

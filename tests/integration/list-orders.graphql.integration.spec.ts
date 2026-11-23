@@ -8,6 +8,7 @@ import { OrderViewDocument } from '../../src/read-model/order-view.schema';
 import { OrderView } from '../../src/read-model/order-view';
 import { OrderViewStatus } from '../../src/read-model/order-view-status.enum';
 import { buildGraphqlTestingApp, mongoUri } from './support/read-model-testing';
+import { bearer, withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(180_000);
 
@@ -74,6 +75,9 @@ function view(
   };
 }
 
+/** Fake Identity for the whole file; queries send a token allowed on the resolver. */
+const auth = withTestIdentity();
+
 describe('GraphQL orders query (integration, MongoDB)', () => {
   let container: StartedMongoDBContainer;
   let app: INestApplication;
@@ -81,8 +85,12 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
   async function gql<T>(
     query: string,
     variables?: Record<string, unknown>,
+    headers: Record<string, string> = auth.headers,
   ): Promise<GqlResponse<T>> {
-    const response = await request(app.getHttpServer()).post('/graphql').send({ query, variables });
+    const response = await request(app.getHttpServer())
+      .post('/graphql')
+      .set(headers)
+      .send({ query, variables });
     return response.body as GqlResponse<T>;
   }
 
@@ -212,6 +220,106 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
       const body = await gql('{ orders { items { orderId revision } } }');
 
       expect(body.errors?.[0].extensions?.code).toBe('GRAPHQL_VALIDATION_FAILED');
+    });
+  });
+
+  describe('access (US-11)', () => {
+    const OPERATIONS: Array<[string, string]> = [
+      ['orders', '{ orders { totalCount } }'],
+      ['order(orderId)', `{ order(orderId: "${orderId(1)}") { orderId } }`],
+      ['introspection', '{ __schema { queryType { name } } }'],
+    ];
+
+    /** Like `gql`, also asserting the HTTP 200 that auth errors keep (contract). */
+    async function call<T>(
+      query: string,
+      variables: Record<string, unknown> | undefined,
+      headers: Record<string, string>,
+    ): Promise<GqlResponse<T>> {
+      const response = await request(app.getHttpServer())
+        .post('/graphql')
+        .set(headers)
+        .send({ query, variables });
+      expect(response.status).toBe(200);
+      return response.body as GqlResponse<T>;
+    }
+
+    function expectRejected(body: GqlResponse<unknown>, code: string, message: string): void {
+      expect(body.data).toBeUndefined();
+      expect(body.errors).toHaveLength(1);
+      expect(body.errors?.[0].extensions?.code).toBe(code);
+      expect(body.errors?.[0].message).toBe(message);
+    }
+
+    it.each(OPERATIONS)('should reject %s without a token as UNAUTHENTICATED', async (_, query) => {
+      expectRejected(await call(query, undefined, {}), 'UNAUTHENTICATED', 'Unauthorized');
+    });
+
+    it.each(OPERATIONS)(
+      'should reject %s with an invalid token as UNAUTHENTICATED',
+      async (_, query) => {
+        const expired = await auth.identity.sign(
+          { roles: ['ADMIN'] },
+          { iat: Math.floor(Date.now() / 1000) - 120, expiresIn: -60 },
+        );
+        for (const headers of [bearer('garbage'), bearer(expired), { Authorization: 'Basic x' }]) {
+          expectRejected(await call(query, undefined, headers), 'UNAUTHENTICATED', 'Unauthorized');
+        }
+      },
+    );
+
+    it('should answer FORBIDDEN with a null field for a token without CUSTOMER or ADMIN', async () => {
+      const headers = bearer(await auth.identity.sign({ roles: ['GUEST'] }));
+
+      const order = await call<{ order: OrderResult | null }>(
+        `{ order(orderId: "${orderId(1)}") { orderId } }`,
+        undefined,
+        headers,
+      );
+      expect(order.data).toEqual({ order: null });
+      expect(order.errors?.[0].extensions?.code).toBe('FORBIDDEN');
+      expect(order.errors?.[0].message).toBe('Forbidden');
+
+      const list = await call<OrdersData>('{ orders { totalCount } }', undefined, headers);
+      expect(list.data ?? null).toBeNull();
+      expect(list.errors?.[0].extensions?.code).toBe('FORBIDDEN');
+    });
+
+    it('should give CUSTOMER and ADMIN callers the same unscoped results', async () => {
+      const query = `{ orders(limit: 100) { totalCount items { orderId } } }`;
+      const asCustomer = await call<OrdersData>(
+        query,
+        undefined,
+        await auth.customerHeaders(CUSTOMER_B),
+      );
+      const asAdmin = await call<OrdersData>(query, undefined, await auth.adminHeaders());
+
+      expect(asCustomer.errors).toBeUndefined();
+      expect(asCustomer).toEqual(asAdmin);
+      expect(asCustomer.data?.orders.totalCount).toBe(11);
+    });
+
+    it('should answer SERVICE_UNAVAILABLE when Identity keys were never loaded', async () => {
+      auth.identity.setAvailable(false);
+      const fresh = await buildGraphqlTestingApp(
+        mongoUri(container.getConnectionString(), 'orders_read_test'),
+      );
+      try {
+        const response = await request(fresh.getHttpServer())
+          .post('/graphql')
+          .set(auth.headers)
+          .send({ query: '{ orders { totalCount } }' });
+
+        expect(response.status).toBe(200);
+        expectRejected(
+          response.body as GqlResponse<unknown>,
+          'SERVICE_UNAVAILABLE',
+          'Authentication is temporarily unavailable, please retry',
+        );
+      } finally {
+        auth.identity.setAvailable(true);
+        await fresh.close();
+      }
     });
   });
 
@@ -431,6 +539,7 @@ describe('GraphQL orders query (integration, MongoDB unavailable)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/graphql')
+      .set(auth.headers)
       .send({ query: '{ orders { totalCount } }' });
     const body = response.body as GqlResponse<OrdersData>;
 
@@ -452,6 +561,7 @@ describe('GraphQL orders query (integration, MongoDB unavailable)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/graphql')
+      .set(auth.headers)
       .send({ query: '{ order(orderId: "99999999-9999-4999-8999-999999999999") { orderId } }' });
     const body = response.body as GqlResponse<{ order: OrderResult | null }>;
 
@@ -506,6 +616,7 @@ describe('GraphQL developer tooling (integration)', () => {
     await withApp('development', async (app) => {
       const introspection = await request(app.getHttpServer())
         .post('/graphql')
+        .set(auth.headers)
         .send({ query: INTROSPECTION });
       expect(introspection.body.data.__schema.queryType.name).toBe('Query');
 
@@ -519,6 +630,7 @@ describe('GraphQL developer tooling (integration)', () => {
     await withApp('production', async (app) => {
       const introspection = await request(app.getHttpServer())
         .post('/graphql')
+        .set(auth.headers)
         .send({ query: INTROSPECTION });
       expect(introspection.body.errors?.[0].message).toMatch(/introspection/i);
       expect(introspection.body.data ?? null).toBeNull();

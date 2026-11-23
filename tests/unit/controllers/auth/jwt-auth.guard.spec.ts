@@ -1,8 +1,11 @@
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import { Request } from 'express';
+import { GraphQLError } from 'graphql';
 import { JwtAuthGuard } from '../../../../src/controllers/auth/jwt-auth.guard';
 import { Public } from '../../../../src/controllers/auth/public.decorator';
+import { GraphqlContext } from '../../../../src/graphql/graphql-context';
 import { AccessTokenClaims } from '../../../../src/infra/auth/access-token-claims';
 import { AccessTokenError } from '../../../../src/infra/auth/access-token.error';
 import { AccessTokenVerifier } from '../../../../src/infra/auth/access-token.verifier';
@@ -87,10 +90,54 @@ describe('JwtAuthGuard', () => {
     expect(request.user).toBe(CLAIMS);
   });
 
-  it('lets non-HTTP contexts through (GraphQL is handled separately)', async () => {
+  it('lets other transports through', async () => {
     await expect(
-      guard.canActivate(contextFor(Fixture, Fixture.prototype.closed, requestWith(), 'graphql')),
+      guard.canActivate(contextFor(Fixture, Fixture.prototype.closed, requestWith(), 'rpc')),
     ).resolves.toBe(true);
     expect(verify).not.toHaveBeenCalled();
+  });
+
+  describe('GraphQL', () => {
+    function graphqlContext(
+      user: AccessTokenClaims | null,
+      authError: AccessTokenError | null,
+    ): ExecutionContext {
+      const context: GraphqlContext = {
+        req: requestWith('Bearer the-token') as Request,
+        user,
+        authError,
+      };
+      const host = new ExecutionContextHost(
+        [undefined, {}, context, undefined],
+        Fixture,
+        Fixture.prototype.closed,
+      );
+      host.setType('graphql');
+      return host;
+    }
+
+    it('allows the caller verified in the context without verifying again', async () => {
+      await expect(guard.canActivate(graphqlContext(CLAIMS, null))).resolves.toBe(true);
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it('rejects a context without a caller as UNAUTHENTICATED', async () => {
+      const promise = guard.canActivate(
+        graphqlContext(null, new AccessTokenError('INVALID', 'expired')),
+      );
+
+      await expect(promise).rejects.toBeInstanceOf(GraphQLError);
+      await expect(promise).rejects.toMatchObject({
+        message: 'Unauthorized',
+        extensions: { code: 'UNAUTHENTICATED' },
+      });
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it('rejects with SERVICE_UNAVAILABLE when the keys were unavailable', async () => {
+      await expect(
+        guard.canActivate(graphqlContext(null, new AccessTokenError('KEYS_UNAVAILABLE', 'fetch'))),
+      ).rejects.toMatchObject({ extensions: { code: 'SERVICE_UNAVAILABLE' } });
+    });
   });
 });

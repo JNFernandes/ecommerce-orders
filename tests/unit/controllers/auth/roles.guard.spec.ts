@@ -1,5 +1,9 @@
 import { ExecutionContext, ForbiddenException, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
+import { Request } from 'express';
+import { GraphQLError } from 'graphql';
+import { GraphqlContext } from '../../../../src/graphql/graphql-context';
 import { AccessTokenClaims } from '../../../../src/infra/auth/access-token-claims';
 import { Role } from '../../../../src/infra/auth/role.enum';
 import { Public } from '../../../../src/controllers/auth/public.decorator';
@@ -112,9 +116,40 @@ describe('RolesGuard', () => {
     expect(guard.canActivate(contextFor(AdminFixture, adminProto.overridden, customer))).toBe(true);
   });
 
-  it('lets non-HTTP contexts through (GraphQL is handled separately)', () => {
-    expect(guard.canActivate(contextFor(Fixture, proto.adminOnly, undefined, 'graphql'))).toBe(
-      true,
-    );
+  it('lets other transports through', () => {
+    expect(guard.canActivate(contextFor(Fixture, proto.adminOnly, undefined, 'rpc'))).toBe(true);
+  });
+
+  describe('GraphQL', () => {
+    function graphqlCheck(handler: Handler, user: AccessTokenClaims | null): boolean {
+      const context: GraphqlContext = {
+        req: {} as Request,
+        user,
+        authError: null,
+      };
+      const host = new ExecutionContextHost([undefined, {}, context, undefined], Fixture, handler);
+      host.setType('graphql');
+      return guard.canActivate(host);
+    }
+
+    it('applies the same effective-roles rule to the caller in the GraphQL context', () => {
+      expect(graphqlCheck(proto.customerOrAdmin, claims([Role.ADMIN]))).toBe(true);
+      expect(graphqlCheck(proto.customerOrAdmin, claims([Role.CUSTOMER], CUSTOMER_ID))).toBe(true);
+    });
+
+    it.each([
+      ['no known roles', claims([], CUSTOMER_ID)],
+      ['CUSTOMER without customerId', claims([Role.CUSTOMER])],
+      ['no caller', null],
+    ])('denies %s with a FORBIDDEN GraphQL error', (_label, user) => {
+      let thrown: unknown;
+      try {
+        graphqlCheck(proto.customerOrAdmin, user);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(GraphQLError);
+      expect(thrown).toMatchObject({ message: 'Forbidden', extensions: { code: 'FORBIDDEN' } });
+    });
   });
 });
