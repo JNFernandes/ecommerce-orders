@@ -11,14 +11,18 @@ import { ListOrdersQuery } from '../queries/list-orders.query';
 import { ListOrdersResult } from '../services/list-orders.service';
 import { OrderViewFilter } from '../read-model/order-view.repository';
 import { GraphQLUserInputFilter } from '../graphql/graphql-user-input.filter';
+import { Role } from '../infra/auth/role.enum';
+import { Roles } from './auth/roles.decorator';
 
 /**
  * GraphQL read path (CQRS query side): validates arguments, dispatches exactly one query on the
  * QueryBus and shapes the read-model result into GraphQL types. No business logic, no commands,
  * no write-model access. Invalid arguments surface as BAD_USER_INPUT and read-model outages as
- * SERVICE_UNAVAILABLE (GraphQLUserInputFilter).
+ * SERVICE_UNAVAILABLE (GraphQLUserInputFilter). Open to `CUSTOMER` and `ADMIN` callers, not yet
+ * scoped to the caller's own orders (US-11, scoping in US-12).
  */
 @Resolver(() => OrderType)
+@Roles(Role.CUSTOMER, Role.ADMIN)
 @UseFilters(GraphQLUserInputFilter)
 export class OrdersResolver {
   constructor(private readonly queryBus: QueryBus) {}

@@ -124,15 +124,15 @@ valid token reaches the endpoint; `GET /api-json` answers without a token.
 
 ### Tests for User Story 2
 
-- [ ] T028 [P] [US2] Update `tests/unit/services/place-order.service.spec.ts` only if the command shape changed (it must not: `PlaceOrderCommand(customerId, items)` stays, data-model "Command changes"); add a unit test `tests/unit/dto/place-order.dto.spec.ts` asserting validation with `forbidNonWhitelisted` rejects a body with `customerId` and accepts `{ items }`
-- [ ] T029 [P] [US2] Update `tests/integration/place-order.integration.spec.ts`: bodies hold only `items`; saved order and published event use the token's `customerId`; body with `customerId` (same and other value) → `400`, nothing saved/published; ADMIN-only → `403`; CUSTOMER without `customerId` → `403`; CUSTOMER+ADMIN → created for own `customerId`; customer not yet created → `404 Customer not found`
-- [ ] T030 [P] [US2] Update `tests/component/place-order.component.spec.ts` (and drop `customerId` from bodies in every other spec under `tests/component/` and `tests/integration/` that places orders): order row and `orders.order-placed` event carry the token's `customerId`; body with `customerId` → `400`; ADMIN-only token → `403`
+- [X] T028 [P] [US2] Update `tests/unit/services/place-order.service.spec.ts` only if the command shape changed (it must not: `PlaceOrderCommand(customerId, items)` stays, data-model "Command changes"); add a unit test `tests/unit/dto/place-order.dto.spec.ts` asserting validation with `forbidNonWhitelisted` rejects a body with `customerId` and accepts `{ items }`
+- [X] T029 [P] [US2] Update `tests/integration/place-order.integration.spec.ts`: bodies hold only `items`; saved order and published event use the token's `customerId`; body with `customerId` (same and other value) → `400`, nothing saved/published; ADMIN-only → `403`; CUSTOMER without `customerId` → `403`; CUSTOMER+ADMIN → created for own `customerId`; customer not yet created → `404 Customer not found`
+- [X] T030 [P] [US2] Update `tests/component/place-order.component.spec.ts` (and drop `customerId` from bodies in every other spec under `tests/component/` and `tests/integration/` that places orders): order row and `orders.order-placed` event carry the token's `customerId`; body with `customerId` → `400`; ADMIN-only token → `403`
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] Remove `customerId` (property, validators and `@ApiProperty`) from `src/dto/place-order.dto.ts`; keep `items` unchanged; update the class JSDoc to say the customer comes from the token
-- [ ] T032 [US2] In `src/controllers/orders.controller.ts` `placeOrder`: add `@Roles(Role.CUSTOMER)`, inject `@CurrentUser() user: AccessTokenClaims`, dispatch `new PlaceOrderCommand(user.customerId, dto.items)` (narrow `customerId` with a guard clause throwing `ForbiddenException` if absent: unreachable after `RolesGuard`, keeps types strict without `!`)
-- [ ] T033 [US2] Update the request example in `src/README.md` / any `.http` or Swagger example in the repo that still sends `customerId` in the place-order body (grep `customerId` under `docs/` and `src/`)
+- [X] T031 [US2] Remove `customerId` (property, validators and `@ApiProperty`) from `src/dto/place-order.dto.ts`; keep `items` unchanged; update the class JSDoc to say the customer comes from the token
+- [X] T032 [US2] In `src/controllers/orders.controller.ts` `placeOrder`: add `@Roles(Role.CUSTOMER)`, inject `@CurrentUser() user: AccessTokenClaims`, dispatch `new PlaceOrderCommand(user.customerId, dto.items)` (narrow `customerId` with a guard clause throwing `ForbiddenException` if absent: unreachable after `RolesGuard`, keeps types strict without `!`)
+- [X] T033 [US2] Update the request example in `src/README.md` / any `.http` or Swagger example in the repo that still sends `customerId` in the place-order body (grep `customerId` under `docs/` and `src/`)
 
 **Checkpoint**: Customers can only order for themselves.
 
@@ -148,17 +148,17 @@ with the same `404` as a missing order.
 
 ### Tests for User Story 3
 
-- [ ] T034 [P] [US3] Extend `tests/unit/domain/order.aggregate.spec.ts`: `isAccessibleBy` true for owner, false for other customer, true for admin (any `customerId`, including `null`), false for `{ customerId: null, isAdmin: false }`
-- [ ] T035 [P] [US3] Update `tests/unit/services/cancel-order.service.spec.ts`: other customer → `NotFoundException('Order not found')` with the same message as a missing order, no save, no publish; owner cancels; admin cancels any; non-`PENDING` owner → existing conflict error
-- [ ] T036 [P] [US3] Update `tests/integration/cancel-order.integration.spec.ts` and `tests/component/cancel-order.component.spec.ts`: other customer's order → `404` with body byte-equal to a random UUID's `404`, order still `PENDING`, no `orders.order-cancelled` event; owner → `200 CANCELLED`; ADMIN-only and CUSTOMER+ADMIN on another customer's order → `200`; non-`PENDING` → `409`; CUSTOMER without `customerId` → `403`; unknown-roles token → `403`
+- [X] T034 [P] [US3] Extend `tests/unit/domain/order.aggregate.spec.ts`: `isAccessibleBy` true for owner, false for other customer, true for admin (any `customerId`, including `null`), false for `{ customerId: null, isAdmin: false }`
+- [X] T035 [P] [US3] Update `tests/unit/services/cancel-order.service.spec.ts`: other customer → `NotFoundException('Order not found')` with the same message as a missing order, no save, no publish; owner cancels; admin cancels any; non-`PENDING` owner → existing conflict error
+- [X] T036 [P] [US3] Update `tests/integration/cancel-order.integration.spec.ts` and `tests/component/cancel-order.component.spec.ts`: other customer's order → `404` with body byte-equal to a random UUID's `404`, order still `PENDING`, no `orders.order-cancelled` event; owner → `200 CANCELLED`; ADMIN-only and CUSTOMER+ADMIN on another customer's order → `200`; non-`PENDING` → `409`; CUSTOMER without `customerId` → `403`; unknown-roles token → `403`
 
 ### Implementation for User Story 3
 
-- [ ] T037 [P] [US3] Create `src/domain/order-requester.ts`: `interface OrderRequester { readonly customerId: string | null; readonly isAdmin: boolean }` (no JWT types, R12); JSDoc
-- [ ] T038 [US3] Add `isAccessibleBy(requester: OrderRequester): boolean` to `src/domain/order.aggregate.ts` (`requester.isAdmin || requester.customerId === this.customerId`); JSDoc
-- [ ] T039 [US3] Add `readonly requester: OrderRequester` to `src/commands/cancel-order.command.ts` (`constructor(orderId, requester)`)
-- [ ] T040 [US3] In `src/services/cancel-order.service.ts`: after loading, throw the same `NotFoundException('Order not found')` when the order is missing **or** `!order.isAccessibleBy(command.requester)`; rest (cancel, save, publish) unchanged
-- [ ] T041 [US3] In `src/controllers/orders.controller.ts` `cancelOrder`: add `@Roles(Role.CUSTOMER, Role.ADMIN)`, `@CurrentUser()`, build `OrderRequester` from effective roles (`customerId` only if `CUSTOMER` is effective, `isAdmin` = has `ADMIN`) and pass it in `CancelOrderCommand`; map nothing new (existing 404/409 mapping stays)
+- [X] T037 [P] [US3] Create `src/domain/order-requester.ts`: `interface OrderRequester { readonly customerId: string | null; readonly isAdmin: boolean }` (no JWT types, R12); JSDoc
+- [X] T038 [US3] Add `isAccessibleBy(requester: OrderRequester): boolean` to `src/domain/order.aggregate.ts` (`requester.isAdmin || requester.customerId === this.customerId`); JSDoc
+- [X] T039 [US3] Add `readonly requester: OrderRequester` to `src/commands/cancel-order.command.ts` (`constructor(orderId, requester)`)
+- [X] T040 [US3] In `src/services/cancel-order.service.ts`: after loading, throw the same `NotFoundException('Order not found')` when the order is missing **or** `!order.isAccessibleBy(command.requester)`; rest (cancel, save, publish) unchanged
+- [X] T041 [US3] In `src/controllers/orders.controller.ts` `cancelOrder`: add `@Roles(Role.CUSTOMER, Role.ADMIN)`, `@CurrentUser()`, build `OrderRequester` from effective roles (`customerId` only if `CUSTOMER` is effective, `isAdmin` = has `ADMIN`) and pass it in `CancelOrderCommand`; map nothing new (existing 404/409 mapping stays)
 
 **Checkpoint**: Cancellation respects ownership.
 
@@ -170,9 +170,9 @@ with the same `404` as a missing order.
 
 **Independent Test**: CUSTOMER token → `403`, order unchanged, nothing published; ADMIN → `200 CONFIRMED`.
 
-- [ ] T042 [P] [US4] Update `tests/integration/confirm-order.integration.spec.ts` and `tests/component/confirm-order.component.spec.ts`: CUSTOMER token → `403`, order still `PENDING`, no `orders.order-confirmed`; ADMIN → `200 CONFIRMED`; ADMIN on unknown id → `404`, on non-`PENDING` → `409`
-- [ ] T043 [US4] In `src/controllers/orders.controller.ts` `confirmOrder`: add `@Roles(Role.ADMIN)`; `ConfirmOrderCommand` unchanged
-- [ ] T044 [US4] Switch any other spec that confirms through REST (e.g. `tests/component/order-projection.component.spec.ts`, `tests/component/dead-letter-retry.component.spec.ts`) to `adminToken()`
+- [X] T042 [P] [US4] Update `tests/integration/confirm-order.integration.spec.ts` and `tests/component/confirm-order.component.spec.ts`: CUSTOMER token → `403`, order still `PENDING`, no `orders.order-confirmed`; ADMIN → `200 CONFIRMED`; ADMIN on unknown id → `404`, on non-`PENDING` → `409`
+- [X] T043 [US4] In `src/controllers/orders.controller.ts` `confirmOrder`: add `@Roles(Role.ADMIN)`; `ConfirmOrderCommand` unchanged
+- [X] T044 [US4] Switch any other spec that confirms through REST (e.g. `tests/component/order-projection.component.spec.ts`, `tests/component/dead-letter-retry.component.spec.ts`) to `adminToken()`
 
 **Checkpoint**: All P1 stories done; REST access rules complete.
 
@@ -189,14 +189,14 @@ request 503; make it available → next request succeeds; 100 valid requests →
 
 ### Tests for User Story 5
 
-- [ ] T045 [P] [US5] Extend `tests/unit/infra/auth/access-token.verifier.spec.ts`: 20 concurrent first `verify` calls → `requestCount === 1`; 100 sequential valid calls → 1 fetch; unavailable with nothing loaded → `KEYS_UNAVAILABLE/fetch`; then available → success without a new verifier; `rotate()` and token with the new `kid` after the cooldown → accepted (fake timers or a verifier built with an injectable clock / cooldown override); 50 random unknown `kid`s inside the cooldown → at most 1 refetch; keys loaded, cache stale (advance past 300 s), `setAvailable(false)` → known-kid token still accepted (R4); `removeKey(kid)` then refresh after 300 s → that token rejected `INVALID`
-- [ ] T046 [P] [US5] Component test `tests/component/identity-unavailable.component.spec.ts`: boot the full app with `TestIdentity.setAvailable(false)`; startup time not blocked (init resolves with `requestCount === 0`); `GET /api-json` 200; Kafka consumer still processes an `identity.user-registered` event (customer row created); `POST /orders` with a valid token → `503` with the exact body; `setAvailable(true)` → same request `201` without restart; captured logs contain no token substring
+- [X] T045 [P] [US5] Extend `tests/unit/infra/auth/access-token.verifier.spec.ts`: 20 concurrent first `verify` calls → `requestCount === 1`; 100 sequential valid calls → 1 fetch; unavailable with nothing loaded → `KEYS_UNAVAILABLE/fetch`; then available → success without a new verifier; `rotate()` and token with the new `kid` after the cooldown → accepted (fake timers or a verifier built with an injectable clock / cooldown override); 50 random unknown `kid`s inside the cooldown → at most 1 refetch; keys loaded, cache stale (advance past 300 s), `setAvailable(false)` → known-kid token still accepted (R4); `removeKey(kid)` then refresh after 300 s → that token rejected `INVALID`
+- [X] T046 [P] [US5] Component test `tests/component/identity-unavailable.component.spec.ts`: boot the full app with `TestIdentity.setAvailable(false)`; startup time not blocked (init resolves with `requestCount === 0`); `GET /api-json` 200; Kafka consumer still processes an `identity.user-registered` event (customer row created); `POST /orders` with a valid token → `503` with the exact body; `setAvailable(true)` → same request `201` without restart; captured logs contain no token substring
 
 ### Implementation for User Story 5
 
-- [ ] T047 [US5] In `src/infra/auth/access-token.verifier.ts` add the last-good fallback (R4): keep a `jwksCache: { jwks?, uat? }` object passed to `createRemoteJWKSet` via jose's `[jwksCache]` symbol export; on a fetch-category failure, if `cache.jwks` exists retry once with `createLocalJWKSet(cache.jwks)`, else throw `AccessTokenError('KEYS_UNAVAILABLE', 'fetch')`; non-JSON body, HTTP error and a set with no usable RS256 key all count as fetch failures (spec edge case)
-- [ ] T048 [US5] Make the verifier's timing testable without exposing it in production config: optional constructor options `{ cooldownMs?: number; cacheMaxAgeMs?: number }` defaulting to `60_000` / `300_000`, used only by tests (JSDoc says so); verify `AuthModule` passes none
-- [ ] T049 [US5] Confirm no code path calls the verifier or fetches the JWKS during `app.init()` (search `onModuleInit`/`onApplicationBootstrap`/factories in `src/infra/auth/` and `src/graphql/`); `TestIdentity.requestCount === 0` after init is asserted in T046
+- [X] T047 [US5] In `src/infra/auth/access-token.verifier.ts` add the last-good fallback (R4): keep a `jwksCache: { jwks?, uat? }` object passed to `createRemoteJWKSet` via jose's `[jwksCache]` symbol export; on a fetch-category failure, if `cache.jwks` exists retry once with `createLocalJWKSet(cache.jwks)`, else throw `AccessTokenError('KEYS_UNAVAILABLE', 'fetch')`; non-JSON body, HTTP error and a set with no usable RS256 key all count as fetch failures (spec edge case)
+- [X] T048 [US5] Make the verifier's timing testable without exposing it in production config: optional constructor options `{ cooldownMs?: number; cacheMaxAgeMs?: number }` defaulting to `60_000` / `300_000`, used only by tests (JSDoc says so); verify `AuthModule` passes none
+- [X] T049 [US5] Confirm no code path calls the verifier or fetches the JWKS during `app.init()` (search `onModuleInit`/`onApplicationBootstrap`/factories in `src/infra/auth/` and `src/graphql/`); `TestIdentity.requestCount === 0` after init is asserted in T046
 
 **Checkpoint**: Identity outages and key rotation handled without restarts.
 
@@ -212,16 +212,16 @@ and every protected operation references it, lists roles and documents 401/403/5
 
 ### Tests for User Story 6
 
-- [ ] T050 [P] [US6] Unit tests `tests/unit/controllers/auth/route-policy.validator.spec.ts`: fixture controller with an unannotated route → `init()` rejects with a message containing `FixtureController.handler`; fixture resolver with an unannotated `@Query` → rejects naming it; `@Public()` handler, method-level `@Roles` and class-level `@Roles` pass; empty `@Roles` metadata (forced via `SetMetadata`) rejected; the real `AppModule` compiles and inits (with `TestIdentity` env)
-- [ ] T051 [P] [US6] Unit test `tests/unit/app.swagger.spec.ts`: `buildSwaggerDocument(app)` declares a bearer JWT scheme; `POST /orders`, cancel and confirm each have `security: [{ bearer: [] }]`, a description naming their roles (`CUSTOMER`; `CUSTOMER` (own orders) or `ADMIN` (any order); `ADMIN`), and `401`, `403`, `503` responses; place-order request schema has no `customerId` property; the document contains no token-like string
+- [X] T050 [P] [US6] Unit tests `tests/unit/controllers/auth/route-policy.validator.spec.ts`: fixture controller with an unannotated route → `init()` rejects with a message containing `FixtureController.handler`; fixture resolver with an unannotated `@Query` → rejects naming it; `@Public()` handler, method-level `@Roles` and class-level `@Roles` pass; empty `@Roles` metadata (forced via `SetMetadata`) rejected; the real `AppModule` compiles and inits (with `TestIdentity` env)
+- [X] T051 [P] [US6] Unit test `tests/unit/app.swagger.spec.ts`: `buildSwaggerDocument(app)` declares a bearer JWT scheme; `POST /orders`, cancel and confirm each have `security: [{ bearer: [] }]`, a description naming their roles (`CUSTOMER`; `CUSTOMER` (own orders) or `ADMIN` (any order); `ADMIN`), and `401`, `403`, `503` responses; place-order request schema has no `customerId` property; the document contains no token-like string
 
 ### Implementation for User Story 6
 
-- [ ] T052 [US6] Create `src/controllers/auth/route-policy.validator.ts`: `RoutePolicyValidator implements OnModuleInit` using `DiscoveryService`, `MetadataScanner`, `Reflector`; for every controller (`PATH_METADATA` on class) and resolver (`RESOLVER_NAME_METADATA` / `RESOLVER_TYPE_METADATA` from `@nestjs/graphql`) method that is a route handler / resolver field, require `IS_PUBLIC_KEY` or a non-empty `ROLES_KEY` on handler or class; collect all offenders and throw one `Error` listing each as `Class.method` (R13); JSDoc
-- [ ] T053 [US6] Register `RoutePolicyValidator` and import `DiscoveryModule` in `src/infra/auth/auth.module.ts`
-- [ ] T054 [US6] Create `src/app.swagger.ts`: `buildSwaggerDocument(app: INestApplication): OpenAPIObject` (`DocumentBuilder` with the existing title/description/version from `main.ts` + `.addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'bearer')`) and `setupSwagger(app)` mounting it at `api`; JSDoc
-- [ ] T055 [US6] Use `setupSwagger(app)` in `src/main.ts` (remove the inline `DocumentBuilder`), and in `tests/integration/auth-rest.integration.spec.ts` / component specs that assert `/api-json`
-- [ ] T056 [US6] In `src/controllers/orders.controller.ts` add `@ApiBearerAuth('bearer')` (class level), extend each operation's `@ApiOperation({ description })` with its roles as in T051, and add `@ApiUnauthorizedResponse`, `@ApiForbiddenResponse`, `@ApiServiceUnavailableResponse` with the exact bodies from contracts/rest-auth.md
+- [X] T052 [US6] Create `src/controllers/auth/route-policy.validator.ts`: `RoutePolicyValidator implements OnModuleInit` using `DiscoveryService`, `MetadataScanner`, `Reflector`; for every controller (`PATH_METADATA` on class) and resolver (`RESOLVER_NAME_METADATA` / `RESOLVER_TYPE_METADATA` from `@nestjs/graphql`) method that is a route handler / resolver field, require `IS_PUBLIC_KEY` or a non-empty `ROLES_KEY` on handler or class; collect all offenders and throw one `Error` listing each as `Class.method` (R13); JSDoc
+- [X] T053 [US6] Register `RoutePolicyValidator` and import `DiscoveryModule` in `src/infra/auth/auth.module.ts`
+- [X] T054 [US6] Create `src/app.swagger.ts`: `buildSwaggerDocument(app: INestApplication): OpenAPIObject` (`DocumentBuilder` with the existing title/description/version from `main.ts` + `.addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'bearer')`) and `setupSwagger(app)` mounting it at `api`; JSDoc
+- [X] T055 [US6] Use `setupSwagger(app)` in `src/main.ts` (remove the inline `DocumentBuilder`), and in `tests/integration/auth-rest.integration.spec.ts` / component specs that assert `/api-json`
+- [X] T056 [US6] In `src/controllers/orders.controller.ts` add `@ApiBearerAuth('bearer')` (class level), extend each operation's `@ApiOperation({ description })` with its roles as in T051, and add `@ApiUnauthorizedResponse`, `@ApiForbiddenResponse`, `@ApiServiceUnavailableResponse` with the exact bodies from contracts/rest-auth.md
 
 **Checkpoint**: No route can be added open by accident; docs show how to call each operation.
 
@@ -253,7 +253,7 @@ keys unavailable → `SERVICE_UNAVAILABLE`; CUSTOMER or ADMIN → same results a
 - [ ] T066 [US7] Add the GraphQL branch to `src/controllers/auth/jwt-auth.guard.ts` (read `GqlExecutionContext.create(ctx).getContext<GraphqlContext>()`; `user` null → throw the `UNAUTHENTICATED` `GraphQLError`; otherwise allow) and to `src/controllers/auth/roles.guard.ts` (same effective-roles rule, failure → `FORBIDDEN` `GraphQLError`)
 - [ ] T067 [US7] Ensure `src/controllers/auth/auth-exception.filter.ts` and `src/graphql/graphql-user-input.filter.ts` let `GraphQLError`s with `UNAUTHENTICATED` / `FORBIDDEN` / `SERVICE_UNAVAILABLE` codes pass through unchanged (no remap to `INTERNAL_SERVER_ERROR` or `BAD_USER_INPUT`); add a case to `tests/unit/graphql/graphql-user-input.filter.spec.ts`
 - [ ] T068 [US7] Extend `src/controllers/auth/current-user.decorator.ts` with the GraphQL branch (`GraphqlContext.user`) and add the case to `tests/unit/controllers/auth/current-user.decorator.spec.ts` (create it covering HTTP too)
-- [ ] T069 [US7] Add `@Roles(Role.CUSTOMER, Role.ADMIN)` at class level on `src/controllers/orders.resolver.ts`; no change to query handlers or results (unscoped until US-12)
+- [X] T069 [US7] Add `@Roles(Role.CUSTOMER, Role.ADMIN)` at class level on `src/controllers/orders.resolver.ts`; no change to query handlers or results (unscoped until US-12) (landed with US6, as the route-policy validator requires it)
 
 **Checkpoint**: Anonymous read-model access closed; all seven stories done.
 
