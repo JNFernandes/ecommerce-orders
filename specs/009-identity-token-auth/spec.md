@@ -332,10 +332,10 @@ the README: it states GraphQL is not scoped until US-12.
   at startup, and kept in memory. Concurrent requests while the set is loading MUST share one
   fetch.
 - **FR-009**: When a token names an unknown `kid`, the system MUST refetch the key set at most
-  once per minute (counted from the previous refetch; the first load does not count). The loaded
-  set MUST also be refreshed on the next use once it is older than the max age Identity sends with
-  it (falling back to 10 minutes when none is sent), so keys removed by Identity stop being
-  accepted.
+  once per minute (counted from the previous fetch, the first load included). The loaded set MUST
+  also be refreshed on the next use once it is older than 5 minutes (a fixed max age, equal to
+  Identity's default; the verifier library cannot read Identity's `Cache-Control`), so keys
+  removed by Identity stop being accepted.
 - **FR-010**: A failed fetch or refresh MUST NOT discard keys already loaded. When no keys are
   loaded and they cannot be fetched, the request MUST be answered `503` with a generic body.
 - **FR-011**: The service MUST start, and its public endpoints, Kafka consumers, projection and
@@ -444,8 +444,9 @@ the README: it states GraphQL is not scoped until US-12.
   today) rather than an HTTP `401`; the codes are `UNAUTHENTICATED` and `FORBIDDEN`. Only
   operations require a token; the schema is covered too (introspection needs a token).
 - **Key cache freshness**: besides the unknown-`kid` refetch requested in the story, the cached
-  key set honours the max age Identity sends (Identity's documented verifier guide), so a key
-  Identity withdraws stops being accepted without restarting Orders. Fallback: 10 minutes.
+  key set is refreshed once it is 5 minutes old (Identity's default max age; `jose` 5.10 cannot
+  read the `Cache-Control` Identity sends), so a key Identity withdraws stops being accepted
+  within 5 minutes without restarting Orders. See ADR 0008.
 - **Required issuer/audience**: like Identity, `JWT_ISSUER` and `JWT_AUDIENCE` have no default
   and are required at startup; `.env.example` gives the local values (`http://localhost:3001`,
   `ecommerce`), matching Identity's `.env.example`.

@@ -23,3 +23,4 @@ requires (Documentation Standards).
 | [0005](0005-dead-letter-retry.md) | Dead-letter retry: per-row transactions with SKIP LOCKED and a self-rescheduling worker | Accepted |
 | [0006](0006-order-joins-payment-and-stock-outcomes.md) | Orders joins the payment and stock outcomes (choreographed saga with a join) | Accepted |
 | [0007](0007-customers-from-identity-events.md) | Customers are created from Identity's user-registered events | Accepted |
+| [0008](0008-identity-token-verification.md) | Orders verifies Identity access tokens locally | Accepted |
