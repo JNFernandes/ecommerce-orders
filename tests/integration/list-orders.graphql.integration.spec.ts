@@ -75,7 +75,10 @@ function view(
   };
 }
 
-/** Fake Identity for the whole file; queries send a token allowed on the resolver. */
+/**
+ * Fake Identity for the whole file; queries send `auth.headers` (CUSTOMER + ADMIN, so ADMIN wins
+ * and results are unscoped, as before US-12) unless a test says otherwise.
+ */
 const auth = withTestIdentity();
 
 describe('GraphQL orders query (integration, MongoDB)', () => {
@@ -285,8 +288,8 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
       expect(list.errors?.[0].extensions?.code).toBe('FORBIDDEN');
     });
 
-    it('should give CUSTOMER and ADMIN callers the same unscoped results', async () => {
-      const query = `{ orders(limit: 100) { totalCount items { orderId } } }`;
+    it('should give an ADMIN every order and a CUSTOMER only their own (US-12)', async () => {
+      const query = `{ orders(limit: 100) { totalCount items { orderId customerId } } }`;
       const asCustomer = await call<OrdersData>(
         query,
         undefined,
@@ -295,8 +298,12 @@ describe('GraphQL orders query (integration, MongoDB)', () => {
       const asAdmin = await call<OrdersData>(query, undefined, await auth.adminHeaders());
 
       expect(asCustomer.errors).toBeUndefined();
-      expect(asCustomer).toEqual(asAdmin);
-      expect(asCustomer.data?.orders.totalCount).toBe(11);
+      expect(asAdmin.data?.orders.totalCount).toBe(11);
+      expect(asCustomer.data?.orders.totalCount).toBe(2);
+      expect(asCustomer.data?.orders.items.map((o) => o.customerId)).toEqual([
+        CUSTOMER_B,
+        CUSTOMER_B,
+      ]);
     });
 
     it('should answer SERVICE_UNAVAILABLE when Identity keys were never loaded', async () => {

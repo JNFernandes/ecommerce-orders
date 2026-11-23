@@ -84,7 +84,7 @@ type OrdersPage {
 
 type Query {
   """
-  Gets one order from the read model by id, or null when no order has that id. Eventually consistent: an order that was just placed may briefly return null until it has been projected.
+  Gets one order from the read model by id, or null when no order has that id. Scoped to the caller: an ADMIN can open any order; a CUSTOMER gets null for another customer's order, exactly as for an unknown id. Eventually consistent: an order that was just placed may briefly return null until it has been projected.
   """
   order(
     """Order identifier (UUID, any case)."""
@@ -92,10 +92,12 @@ type Query {
   ): Order
 
   """
-  Lists orders from the read model, newest first (orders without a placement time last). Eventually consistent: a just-placed order may take a moment to appear.
+  Lists orders from the read model, newest first (orders without a placement time last). Scoped to the caller: an ADMIN sees every order; a CUSTOMER sees only their own, and totalCount and hasNextPage count only those. Eventually consistent: a just-placed order may take a moment to appear.
   """
   orders(
-    """Only orders of this customer (UUID)."""
+    """
+    Only orders of this customer (UUID). For a CUSTOMER caller, their own id is the same as leaving it out, and any other id gives an empty page.
+    """
     customerId: ID
 
     """Page size, 1–100."""

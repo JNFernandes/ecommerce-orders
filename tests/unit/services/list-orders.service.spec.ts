@@ -4,6 +4,13 @@ import { OrderViewRepository } from '../../../src/read-model/order-view.reposito
 import { OrderView } from '../../../src/read-model/order-view';
 import { OrderViewStatus } from '../../../src/read-model/order-view-status.enum';
 import { ReadModelUnavailableError } from '../../../src/read-model/errors';
+import { OrderReadScope } from '../../../src/queries/order-read-scope';
+import { Role } from '../../../src/infra/auth/role.enum';
+
+const OWN = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+const OTHER = '11111111-2222-4333-8444-555555555555';
+const ADMIN = OrderReadScope.forCaller({ sub: 'admin', roles: [Role.ADMIN] });
+const CUSTOMER = OrderReadScope.forCaller({ sub: 'u', roles: [Role.CUSTOMER], customerId: OWN });
 
 function view(n: number): OrderView {
   return {
@@ -35,12 +42,12 @@ function serviceReturning(
 }
 
 describe('ListOrdersService', () => {
-  it('should pass the filter and page through to the read-model repository', async () => {
+  it('should pass the filter and page through unchanged for an admin', async () => {
     const { service, list } = serviceReturning([], 0);
     const filter = { status: OrderViewStatus.CANCELLED, customerId: 'c-1' };
     const page = { limit: 10, offset: 30 };
 
-    await service.execute(new ListOrdersQuery(filter, page));
+    await service.execute(new ListOrdersQuery(ADMIN, filter, page));
 
     expect(list).toHaveBeenCalledWith(filter, page);
   });
@@ -49,7 +56,7 @@ describe('ListOrdersService', () => {
     const views = [view(1), view(2)];
     const { service } = serviceReturning(views, 5);
 
-    const result = await service.execute(new ListOrdersQuery({}, { limit: 2, offset: 0 }));
+    const result = await service.execute(new ListOrdersQuery(ADMIN, {}, { limit: 2, offset: 0 }));
 
     expect(result.views).toBe(views);
     expect(result.totalCount).toBe(5);
@@ -65,7 +72,7 @@ describe('ListOrdersService', () => {
     const views = Array.from({ length: returned }, (_unused, i) => view(i));
     const { service } = serviceReturning(views, total);
 
-    const result = await service.execute(new ListOrdersQuery({}, { limit: 2, offset }));
+    const result = await service.execute(new ListOrdersQuery(ADMIN, {}, { limit: 2, offset }));
 
     expect(result.hasNextPage).toBe(expected);
   });
@@ -75,7 +82,56 @@ describe('ListOrdersService', () => {
     const service = new ListOrdersService({ list } as unknown as OrderViewRepository);
 
     await expect(
-      service.execute(new ListOrdersQuery({}, { limit: 20, offset: 0 })),
+      service.execute(new ListOrdersQuery(ADMIN, {}, { limit: 20, offset: 0 })),
     ).rejects.toThrow(ReadModelUnavailableError);
+  });
+
+  describe('scoped to a customer', () => {
+    it("should restrict the list to the customer's own orders", async () => {
+      const { service, list } = serviceReturning([], 0);
+      const page = { limit: 20, offset: 0 };
+
+      await service.execute(
+        new ListOrdersQuery(CUSTOMER, { status: OrderViewStatus.PENDING }, page),
+      );
+
+      expect(list).toHaveBeenCalledWith({ status: OrderViewStatus.PENDING, customerId: OWN }, page);
+    });
+
+    it("should treat a filter on the customer's own id like no filter", async () => {
+      const { service, list } = serviceReturning([], 0);
+
+      await service.execute(
+        new ListOrdersQuery(CUSTOMER, { customerId: OWN.toUpperCase() }, { limit: 20, offset: 0 }),
+      );
+
+      expect(list).toHaveBeenCalledWith({ customerId: OWN }, { limit: 20, offset: 0 });
+    });
+
+    it("should answer another customer's id with an empty page, without calling the repository", async () => {
+      const { service, list } = serviceReturning([view(1)], 1);
+
+      const result = await service.execute(
+        new ListOrdersQuery(
+          CUSTOMER,
+          { customerId: OTHER, status: OrderViewStatus.CONFIRMED },
+          { limit: 20, offset: 0 },
+        ),
+      );
+
+      expect(result).toEqual({ views: [], totalCount: 0, hasNextPage: false });
+      expect(list).not.toHaveBeenCalled();
+    });
+
+    it("should compute hasNextPage over the customer's orders only", async () => {
+      const { service } = serviceReturning([view(1), view(2)], 3);
+
+      const result = await service.execute(
+        new ListOrdersQuery(CUSTOMER, {}, { limit: 2, offset: 0 }),
+      );
+
+      expect(result.totalCount).toBe(3);
+      expect(result.hasNextPage).toBe(true);
+    });
   });
 });

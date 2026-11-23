@@ -14,7 +14,12 @@ export class ListOrdersArgs {
   @IsEnum(OrderViewStatus)
   status?: OrderViewStatus;
 
-  @Field(() => ID, { nullable: true, description: 'Only orders of this customer (UUID).' })
+  @Field(() => ID, {
+    nullable: true,
+    description:
+      'Only orders of this customer (UUID). For a CUSTOMER caller, their own id is the same as ' +
+      'leaving it out, and any other id gives an empty page.',
+  })
   @IsOptional()
   @IsUUID()
   customerId?: string;

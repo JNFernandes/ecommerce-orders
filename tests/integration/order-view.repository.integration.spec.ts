@@ -156,6 +156,12 @@ describe('OrderViewRepository (integration, MongoDB)', () => {
     const indexes = await connection.collection('order_views').listIndexes().toArray();
     const byName = Object.fromEntries(indexes.map((index) => [index.name, index.key]));
     expect(byName.customerId_placedAt).toEqual({ customerId: 1, placedAt: -1, _id: -1 });
+    expect(byName.customerId_status_placedAt).toEqual({
+      customerId: 1,
+      status: 1,
+      placedAt: -1,
+      _id: -1,
+    });
     expect(byName.status_placedAt).toEqual({ status: 1, placedAt: -1, _id: -1 });
     expect(byName.placedAt).toEqual({ placedAt: -1, _id: -1 });
   });
@@ -184,6 +190,96 @@ describe('OrderViewRepository (integration, MongoDB)', () => {
 
   it('should return null for an unknown order id', async () => {
     expect(await repository.findById(nextOrderId())).toBeNull();
+  });
+
+  describe('owner scoping (US-12)', () => {
+    const OWNER_A = '33333333-0000-4000-8000-00000000000a';
+    const OWNER_B = '33333333-0000-4000-8000-00000000000b';
+    const idsA: string[] = [];
+    let orderOfB = '';
+
+    beforeAll(async () => {
+      await repository.ensureIndexes();
+      for (let i = 0; i < 3; i++) {
+        const orderId = nextOrderId();
+        idsA.push(orderId);
+        await repository.insert(
+          view(orderId, {
+            customerId: OWNER_A,
+            status: i === 0 ? OrderViewStatus.CONFIRMED : OrderViewStatus.PENDING,
+            placedAt: new Date(Date.UTC(2026, 10, 13, 9, i)),
+          }),
+        );
+      }
+      orderOfB = nextOrderId();
+      await repository.insert(view(orderOfB, { customerId: OWNER_B }));
+    });
+
+    it("should page and count only the owner's orders", async () => {
+      const first = await repository.list({ customerId: OWNER_A }, { limit: 2, offset: 0 });
+      const second = await repository.list({ customerId: OWNER_A }, { limit: 2, offset: 2 });
+
+      expect(first.totalCount).toBe(3);
+      expect(first.views.map((v) => v.orderId)).toEqual([idsA[2], idsA[1]]);
+      expect(second.views.map((v) => v.orderId)).toEqual([idsA[0]]);
+    });
+
+    it("should count owner + status over the owner's orders only", async () => {
+      const page = await repository.list(
+        { customerId: OWNER_A, status: OrderViewStatus.PENDING },
+        { limit: 20, offset: 0 },
+      );
+
+      expect(page.totalCount).toBe(2);
+      expect(page.views.every((v) => v.customerId === OWNER_A)).toBe(true);
+    });
+
+    it.each([
+      ['owner', { customerId: OWNER_A }, 'customerId_placedAt'],
+      [
+        'owner + status',
+        { customerId: OWNER_A, status: OrderViewStatus.PENDING },
+        'customerId_status_placedAt',
+      ],
+    ])(
+      'should serve the %s list and count from an index (no COLLSCAN)',
+      async (_l, q, indexName) => {
+        const collection = connection.collection('order_views');
+        const listPlan = await collection.find(q).sort({ placedAt: -1, _id: -1 }).explain();
+        const countPlan = await connection.db!.command({
+          explain: { count: 'order_views', query: q },
+        });
+
+        // The list walks the index (IXSCAN); a count may be answered from the index keys alone
+        // (COUNT_SCAN). Both are index-backed; what matters is the index used and no COLLSCAN.
+        for (const [plan, stage] of [
+          [listPlan, 'IXSCAN'],
+          [countPlan, /IXSCAN|COUNT_SCAN/],
+        ] as const) {
+          const winning = JSON.stringify(plan.queryPlanner.winningPlan);
+          expect(winning).toMatch(stage);
+          expect(winning).toContain(`"indexName":"${indexName}"`);
+          expect(winning).not.toContain('COLLSCAN');
+        }
+      },
+    );
+
+    it('should find an order by id for its owner and for an unscoped (admin) read', async () => {
+      expect((await repository.findOne(idsA[0], OWNER_A))?.orderId).toBe(idsA[0]);
+      expect((await repository.findOne(orderOfB))?.orderId).toBe(orderOfB);
+    });
+
+    it("should return null for another owner's order, exactly like an unknown id", async () => {
+      expect(await repository.findOne(orderOfB, OWNER_A)).toBeNull();
+      expect(await repository.findOne(nextOrderId(), OWNER_A)).toBeNull();
+    });
+
+    it('should return the plain view from findOne, without the revision', async () => {
+      const found = await repository.findOne(idsA[1], OWNER_A);
+
+      expect(found).not.toHaveProperty('revision');
+      expect(found?.customerId).toBe(OWNER_A);
+    });
   });
 });
 

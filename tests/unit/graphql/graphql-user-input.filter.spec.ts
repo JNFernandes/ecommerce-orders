@@ -4,6 +4,7 @@ import { GraphQLUserInputFilter } from '../../../src/graphql/graphql-user-input.
 import { ReadModelUnavailableError } from '../../../src/read-model/errors';
 import { authenticationError, forbiddenError } from '../../../src/graphql/graphql-auth.errors';
 import { AccessTokenError } from '../../../src/infra/auth/access-token.error';
+import { ReadScopeForbiddenError } from '../../../src/queries/order-read-scope';
 
 function caught(exception: unknown): unknown {
   try {
@@ -61,6 +62,14 @@ describe('GraphQLUserInputFilter', () => {
 
     expect(thrown).toBe(error);
     expect(thrown.extensions.code).toBe(code);
+  });
+
+  it('should turn a missing read scope into FORBIDDEN, like RolesGuard', () => {
+    const error = caught(new ReadScopeForbiddenError()) as GraphQLError;
+
+    expect(error).toBeInstanceOf(GraphQLError);
+    expect(error.extensions.code).toBe('FORBIDDEN');
+    expect(error.message).toBe(forbiddenError().message);
   });
 
   it('should rethrow any other error unchanged', () => {

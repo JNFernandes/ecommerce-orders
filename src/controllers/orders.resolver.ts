@@ -13,13 +13,17 @@ import { OrderViewFilter } from '../read-model/order-view.repository';
 import { GraphQLUserInputFilter } from '../graphql/graphql-user-input.filter';
 import { Role } from '../infra/auth/role.enum';
 import { Roles } from './auth/roles.decorator';
+import { CurrentUser } from './auth/current-user.decorator';
+import { AccessTokenClaims } from '../infra/auth/access-token-claims';
+import { OrderReadScope } from '../queries/order-read-scope';
 
 /**
  * GraphQL read path (CQRS query side): validates arguments, dispatches exactly one query on the
  * QueryBus and shapes the read-model result into GraphQL types. No business logic, no commands,
- * no write-model access. Invalid arguments surface as BAD_USER_INPUT and read-model outages as
- * SERVICE_UNAVAILABLE (GraphQLUserInputFilter). Open to `CUSTOMER` and `ADMIN` callers, not yet
- * scoped to the caller's own orders (US-11, scoping in US-12).
+ * no write-model access. Invalid arguments surface as BAD_USER_INPUT, read-model outages as
+ * SERVICE_UNAVAILABLE and callers without a read scope as FORBIDDEN (GraphQLUserInputFilter).
+ * Open to `CUSTOMER` and `ADMIN` callers; every query carries the caller's
+ * {@link OrderReadScope} (US-12), which the query handlers apply — no filtering happens here.
  */
 @Resolver(() => OrderType)
 @Roles(Role.CUSTOMER, Role.ADMIN)
@@ -31,9 +35,15 @@ export class OrdersResolver {
     name: 'orders',
     description:
       'Lists orders from the read model, newest first (orders without a placement time last). ' +
-      'Eventually consistent: a just-placed order may take a moment to appear.',
+      'Scoped to the caller: an ADMIN sees every order; a CUSTOMER sees only their own, and ' +
+      'totalCount and hasNextPage count only those. Eventually consistent: a just-placed order ' +
+      'may take a moment to appear.',
   })
-  async orders(@Args() args: ListOrdersArgs): Promise<OrdersPageType> {
+  async orders(
+    @Args() args: ListOrdersArgs,
+    @CurrentUser() user: AccessTokenClaims,
+  ): Promise<OrdersPageType> {
+    const scope = OrderReadScope.forCaller(user);
     const filter: OrderViewFilter = {};
     if (args.status !== undefined) {
       filter.status = args.status;
@@ -42,7 +52,7 @@ export class OrdersResolver {
       filter.customerId = args.customerId;
     }
     const result = await this.queryBus.execute<ListOrdersQuery, ListOrdersResult>(
-      new ListOrdersQuery(filter, { limit: args.limit, offset: args.offset }),
+      new ListOrdersQuery(scope, filter, { limit: args.limit, offset: args.offset }),
     );
     const page = new OrdersPageType();
     page.items = result.views.map((view) => OrderType.fromView(view));
@@ -56,12 +66,17 @@ export class OrdersResolver {
     nullable: true,
     description:
       'Gets one order from the read model by id, or null when no order has that id. ' +
-      'Eventually consistent: an order that was just placed may briefly return null until it ' +
-      'has been projected.',
+      'Scoped to the caller: an ADMIN can open any order; a CUSTOMER gets null for another ' +
+      "customer's order, exactly as for an unknown id. Eventually consistent: an order that was " +
+      'just placed may briefly return null until it has been projected.',
   })
-  async order(@Args() args: GetOrderArgs): Promise<OrderType | null> {
+  async order(
+    @Args() args: GetOrderArgs,
+    @CurrentUser() user: AccessTokenClaims,
+  ): Promise<OrderType | null> {
+    const scope = OrderReadScope.forCaller(user);
     const view = await this.queryBus.execute<GetOrderQuery, OrderView | null>(
-      new GetOrderQuery(args.orderId),
+      new GetOrderQuery(scope, args.orderId),
     );
     return view ? OrderType.fromView(view) : null;
   }

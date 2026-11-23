@@ -3,6 +3,8 @@ import { GqlExceptionFilter } from '@nestjs/graphql';
 import { UserInputError } from '@nestjs/apollo';
 import { GraphQLError } from 'graphql';
 import { ReadModelUnavailableError } from '../read-model/errors';
+import { ReadScopeForbiddenError } from '../queries/order-read-scope';
+import { forbiddenError } from './graphql-auth.errors';
 
 /** Message returned when the read model cannot be reached (no internal details). */
 export const READ_MODEL_UNAVAILABLE_MESSAGE = 'Order data is temporarily unavailable, please retry';
@@ -13,11 +15,16 @@ export const READ_MODEL_UNAVAILABLE_MESSAGE = 'Order data is temporarily unavail
  * - BadRequestException from the global ValidationPipe → `BAD_USER_INPUT` with the validation
  *   messages (by default @nestjs/apollo would report `BAD_REQUEST`);
  * - ReadModelUnavailableError → `SERVICE_UNAVAILABLE` with a generic message, never the cause.
+ * - ReadScopeForbiddenError (caller without an order read scope, US-12) → `FORBIDDEN`, the same
+ *   error `RolesGuard` gives.
  * Anything else is rethrown unchanged.
  */
-@Catch(BadRequestException, ReadModelUnavailableError)
+@Catch(BadRequestException, ReadModelUnavailableError, ReadScopeForbiddenError)
 export class GraphQLUserInputFilter implements GqlExceptionFilter {
   catch(exception: unknown): never {
+    if (exception instanceof ReadScopeForbiddenError) {
+      throw forbiddenError();
+    }
     if (exception instanceof BadRequestException) {
       const messages = validationMessages(exception);
       throw new UserInputError(messages.join('; '), {
