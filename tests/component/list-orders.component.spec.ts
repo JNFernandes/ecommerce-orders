@@ -1,10 +1,8 @@
 import { Test } from '@nestjs/testing';
 import { INestApplication, Logger } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { GraphQLModule } from '@nestjs/graphql';
-import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { DataSource } from 'typeorm';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
@@ -15,7 +13,7 @@ import { Kafka } from 'kafkajs';
 import { createTopicsWhenReady } from './support/kafka-testing';
 import configuration from '../../src/config/configuration';
 import { configureApp } from '../../src/app.setup';
-import { buildGraphqlOptions } from '../../src/graphql/graphql.config';
+import { graphqlModule } from '../../src/graphql/graphql.config';
 import { KafkaModule } from '../../src/infra/kafka/kafka.module';
 import {
   ORDER_CANCELLED_TOPIC,
@@ -42,6 +40,8 @@ import { GetOrderService } from '../../src/services/get-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { OrdersResolver } from '../../src/controllers/orders.resolver';
 import { ReadModelModule } from '../../src/read-model/read-model.module';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(300_000);
 
@@ -86,6 +86,8 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
   let mongoContainer: StartedMongoDBContainer;
   let app: INestApplication;
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
@@ -115,6 +117,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -136,11 +139,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
         CqrsModule.forRoot(),
         KafkaModule,
         ReadModelModule,
-        GraphQLModule.forRootAsync<ApolloDriverConfig>({
-          driver: ApolloDriver,
-          inject: [ConfigService],
-          useFactory: buildGraphqlOptions,
-        }),
+        graphqlModule(),
       ],
       controllers: [OrdersController],
       providers: [
@@ -184,7 +183,8 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
   async function placeOrder(customerId: string, unitPrice: number): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .send({ customerId, items: [{ productId: 'p-1', quantity: 2, unitPrice }] });
+      .set(await auth.customerHeaders(customerId))
+      .send({ items: [{ productId: 'p-1', quantity: 2, unitPrice }] });
     expect(response.status).toBe(201);
     return response.body.orderId;
   }
@@ -192,6 +192,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
   async function listOrders(args = 'limit: 10'): Promise<OrdersPage> {
     const response = await request(app.getHttpServer())
       .post('/graphql')
+      .set(await auth.customerHeaders(CUSTOMER_A))
       .send({
         query: `{ orders(${args}) { totalCount hasNextPage items {
           orderId customerId status totalAmount placedAt confirmedAt cancelledAt
@@ -224,7 +225,9 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
     });
     expect(placed.placedAt).toEqual(expect.any(String));
 
-    const confirm = await request(app.getHttpServer()).post(`/orders/${first}/confirm`);
+    const confirm = await request(app.getHttpServer())
+      .post(`/orders/${first}/confirm`)
+      .set(await auth.adminHeaders());
     expect(confirm.status).toBe(200);
 
     await waitFor(async () => {
@@ -238,7 +241,9 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
   it('should filter the listed orders by customer and by status', async () => {
     const ofB = await placeOrder(CUSTOMER_B, 5);
     const toCancel = await placeOrder(CUSTOMER_A, 7);
-    const cancel = await request(app.getHttpServer()).post(`/orders/${toCancel}/cancel`);
+    const cancel = await request(app.getHttpServer())
+      .post(`/orders/${toCancel}/cancel`)
+      .set(await auth.adminHeaders());
     expect(cancel.status).toBe(200);
 
     await waitFor(async () => {
@@ -257,6 +262,7 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
   async function getOrder(orderId: string): Promise<ListedOrder | null> {
     const response = await request(app.getHttpServer())
       .post('/graphql')
+      .set(await auth.adminHeaders())
       .send({
         query: `query ($id: ID!) { order(orderId: $id) {
           orderId customerId status totalAmount placedAt confirmedAt cancelledAt
@@ -282,7 +288,9 @@ describe('List orders — REST → Postgres → Kafka → projection → MongoDB
       items: [{ productId: 'p-1', quantity: 2, subtotal: 25 }],
     });
 
-    const confirm = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const confirm = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(await auth.adminHeaders());
     expect(confirm.status).toBe(200);
 
     await waitFor(async () => {

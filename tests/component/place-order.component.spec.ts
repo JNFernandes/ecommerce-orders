@@ -25,6 +25,8 @@ import { OrderDeadLetterRepository } from '../../src/repositories/order-dead-let
 import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(240_000);
 
@@ -57,7 +59,10 @@ describe('Place Order — full write flow (component)', () => {
   // separate future service). To verify CT-01 ("OrderPlaced emitted to Kafka") without
   // that consumer, the test itself subscribes a throwaway consumer to observe the topic.
   let observerConsumer: Consumer;
-  const observedMessages: Array<{ aggregateId: string; totalAmount: number }> = [];
+  const observedMessages: Array<{ aggregateId: string; customerId: string; totalAmount: number }> =
+    [];
+
+  const auth = withTestIdentity();
 
   beforeAll(async () => {
     postgresContainer = await new PostgreSqlContainer('postgres:16-alpine').start();
@@ -69,6 +74,7 @@ describe('Place Order — full write flow (component)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -125,9 +131,14 @@ describe('Place Order — full write flow (component)', () => {
         if (!message.value) return;
         const event = JSON.parse(message.value.toString()) as {
           aggregateId: string;
+          customerId: string;
           totalAmount: number;
         };
-        observedMessages.push({ aggregateId: event.aggregateId, totalAmount: event.totalAmount });
+        observedMessages.push({
+          aggregateId: event.aggregateId,
+          customerId: event.customerId,
+          totalAmount: event.totalAmount,
+        });
       },
     });
   });
@@ -143,8 +154,8 @@ describe('Place Order — full write flow (component)', () => {
   it('should save to DB and emit OrderPlaced to Kafka', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
       .send({
-        customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 2, unitPrice: 29.99 }],
       });
 
@@ -153,20 +164,22 @@ describe('Place Order — full write flow (component)', () => {
 
     const orderRows = await dataSource.query('SELECT * FROM orders WHERE id = $1', [orderId]);
     expect(orderRows).toHaveLength(1);
+    expect(orderRows[0].customerId).toBe(EXISTING_CUSTOMER_ID);
 
     await waitFor(() => {
       const published = observedMessages.find((m) => m.aggregateId === orderId);
       expect(published).toBeDefined();
       expect(published?.totalAmount).toBeCloseTo(59.98, 2);
+      expect(published?.customerId).toBe(EXISTING_CUSTOMER_ID);
     });
   });
 
   // CT-04
-  it('should reject an unknown customerId before any DB save or Kafka publish', async () => {
+  it('should reject a token customer not created yet before any DB save or Kafka publish', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(await auth.customerHeaders(UNKNOWN_CUSTOMER_ID))
       .send({
-        customerId: UNKNOWN_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 1 }],
       });
 
@@ -186,8 +199,8 @@ describe('Place Order — full write flow (component)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
       .send({
-        customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-999', quantity: 1, unitPrice: 5 }],
       });
 
@@ -200,5 +213,39 @@ describe('Place Order — full write flow (component)', () => {
     expect(deadLetterRows.length).toBeGreaterThanOrEqual(1);
 
     producer.send = originalSend;
+  });
+
+  describe('the customer comes from the token (US-11)', () => {
+    async function orderCount(): Promise<number> {
+      const [{ count }] = await dataSource.query('SELECT COUNT(*)::int AS count FROM orders');
+      return count;
+    }
+
+    it('should return 400 for a body with a customerId and save nothing', async () => {
+      const before = await orderCount();
+
+      const response = await request(app.getHttpServer())
+        .post('/orders')
+        .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
+        .send({
+          customerId: EXISTING_CUSTOMER_ID,
+          items: [{ productId: 'prod-001', quantity: 1, unitPrice: 1 }],
+        });
+
+      expect(response.status).toBe(400);
+      expect(await orderCount()).toBe(before);
+    });
+
+    it('should return 403 for an ADMIN-only token and save nothing', async () => {
+      const before = await orderCount();
+
+      const response = await request(app.getHttpServer())
+        .post('/orders')
+        .set(await auth.adminHeaders())
+        .send({ items: [{ productId: 'prod-001', quantity: 1, unitPrice: 1 }] });
+
+      expect(response.status).toBe(403);
+      expect(await orderCount()).toBe(before);
+    });
   });
 });

@@ -39,6 +39,8 @@ import { CancelOrderService } from '../../src/services/cancel-order.service';
 import { OutcomeWriteFlow } from '../../src/services/outcome-write-flow';
 import { ApplyPaymentOutcomeService } from '../../src/services/apply-payment-outcome.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(300_000);
 
@@ -79,6 +81,8 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
   let observerConsumer: Consumer;
   const observed: ObservedEvent[] = [];
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
@@ -110,6 +114,7 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -197,8 +202,8 @@ describe('React to payment outcome — Kafka → Orders → Kafka (component)', 
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
       .send({
-        customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }],
       });
     expect(response.status).toBe(201);

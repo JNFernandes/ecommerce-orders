@@ -225,3 +225,27 @@ describe('Order.cancel() with a reason', () => {
     expect(order.cancellationReason).toBe('too expensive');
   });
 });
+
+describe('Order.isAccessibleBy() (US-11)', () => {
+  const OTHER_CUSTOMER_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const order = Order.place(CUSTOMER_ID, [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }]);
+
+  it('should be true for the owner', () => {
+    expect(order.isAccessibleBy({ customerId: CUSTOMER_ID, isAdmin: false })).toBe(true);
+  });
+
+  it('should be false for another customer', () => {
+    expect(order.isAccessibleBy({ customerId: OTHER_CUSTOMER_ID, isAdmin: false })).toBe(false);
+  });
+
+  it.each([[CUSTOMER_ID], [OTHER_CUSTOMER_ID], [null]])(
+    'should be true for an admin (customerId %s)',
+    (customerId) => {
+      expect(order.isAccessibleBy({ customerId, isAdmin: true })).toBe(true);
+    },
+  );
+
+  it('should be false for a requester with no customerId who is not an admin', () => {
+    expect(order.isAccessibleBy({ customerId: null, isAdmin: false })).toBe(false);
+  });
+});

@@ -10,6 +10,7 @@ import { OrderConfirmationError } from './order-confirmation.error';
 import { PaymentOutcome } from './payment-outcome.enum';
 import { StockOutcome } from './stock-outcome.enum';
 import { Attention, OutcomeApplication, OutcomeRecord } from './outcome-application';
+import { OrderRequester } from './order-requester';
 
 export interface RawOrderItem {
   productId: string;
@@ -86,6 +87,15 @@ export class Order {
 
     order.domainEvents.push(OrderPlaced.from(order));
     return order;
+  }
+
+  /**
+   * Whether this requester may act on the order (US-11): administrators may act on any order,
+   * customers only on their own. A requester with no customer id who is not an administrator
+   * may act on none.
+   */
+  isAccessibleBy(requester: OrderRequester): boolean {
+    return requester.isAdmin || requester.customerId === this.customerId;
   }
 
   /**

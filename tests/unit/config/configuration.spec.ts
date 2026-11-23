@@ -64,3 +64,52 @@ describe('configuration: cors', () => {
     ]);
   });
 });
+
+describe('configuration: auth', () => {
+  const keys = [
+    'IDENTITY_JWKS_URL',
+    'JWT_ISSUER',
+    'JWT_AUDIENCE',
+    'JWT_CLOCK_TOLERANCE_SECONDS',
+  ] as const;
+  const original = new Map(keys.map((key) => [key, process.env[key]]));
+
+  beforeEach(() => {
+    keys.forEach((key) => delete process.env[key]);
+  });
+
+  afterEach(() => {
+    original.forEach((value, key) => {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    });
+  });
+
+  it('uses the local Identity key set and a 5 s tolerance by default', () => {
+    const { auth } = configuration();
+    expect(auth.jwksUrl).toBe('http://localhost:3001/.well-known/jwks.json');
+    expect(auth.clockToleranceSeconds).toBe(5);
+  });
+
+  it('leaves issuer and audience undefined when unset, without throwing', () => {
+    const { auth } = configuration();
+    expect(auth.issuer).toBeUndefined();
+    expect(auth.audience).toBeUndefined();
+  });
+
+  it('reads every auth setting from the environment', () => {
+    process.env.IDENTITY_JWKS_URL = 'http://identity:3001/.well-known/jwks.json';
+    process.env.JWT_ISSUER = 'http://identity:3001';
+    process.env.JWT_AUDIENCE = 'shop';
+    process.env.JWT_CLOCK_TOLERANCE_SECONDS = '10';
+    expect(configuration().auth).toEqual({
+      jwksUrl: 'http://identity:3001/.well-known/jwks.json',
+      issuer: 'http://identity:3001',
+      audience: 'shop',
+      clockToleranceSeconds: 10,
+    });
+  });
+});

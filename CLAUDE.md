@@ -67,6 +67,33 @@ warning (`--max-warnings 0`), or a formatting violation.
   (`src/graphql/graphql-user-input.filter.ts`, applied with `@UseFilters` on resolvers).
 - A request handler issues a command **or** a query, never both.
 
+## Authentication (US-11)
+
+- Every REST route and GraphQL operation needs an Identity access token (RS256, verified locally
+  by `AccessTokenVerifier` in `src/infra/auth/` with `jose` 5.10; not 6.x, it is ESM-only). See
+  ADR 0008 and `specs/009-identity-token-auth/`.
+- Global guards from `AuthModule`, in order `JwtAuthGuard` → `RolesGuard`, so answers come
+  401/503 → 403 → 400 → 404/409. REST token failures are `AccessTokenError`, answered by
+  `AuthExceptionFilter` (fixed 401 body with `WWW-Authenticate: Bearer`, or 503).
+- Every controller route and resolver needs `@Public()` or `@Roles(...)` (handler or class);
+  `RoutePolicyValidator` fails startup otherwise.
+- `@CurrentUser()` is the only way handlers get user data. Effective roles: `CUSTOMER` counts only
+  with a `customerId`. `POST /orders` takes the customer from the token (body `customerId` → 400).
+- Ownership is a domain rule: `Order.isAccessibleBy(OrderRequester)`, enforced by the service;
+  another customer's order is the same `404` as a missing one. Never in guards or controllers.
+- GraphQL: the token is verified once in the context (`src/graphql/graphql-context.ts`);
+  `graphqlAuthPlugin` rejects operations without a caller (`UNAUTHENTICATED` /
+  `SERVICE_UNAVAILABLE`, no data, HTTP 200); `RolesGuard` answers `FORBIDDEN`. Use
+  `graphqlModule()` (`src/graphql/graphql.config.ts`) to mount GraphQL. Results are not scoped
+  to the caller until US-12.
+- Never log or echo a token, even truncated; log the `AccessTokenError.category` only.
+- Never fetch the JWKS at startup, in a module factory or a lifecycle hook (lazy, single flight,
+  60 s cooldown, 300 s cache, last good keys kept when a refresh fails).
+- Auth env: `IDENTITY_JWKS_URL`, `JWT_ISSUER` and `JWT_AUDIENCE` (both required, startup fails
+  without them), `JWT_CLOCK_TOLERANCE_SECONDS` (5).
+- Tests: `withTestIdentity()` (`tests/support/auth-testing.ts`) starts a fake Identity
+  (`tests/support/test-identity.ts`) and gives role headers; call it before compiling the module.
+
 ## Event contracts
 
 - Produced: `orders.order-placed`, `orders.order-confirmed`, `orders.order-cancelled`.

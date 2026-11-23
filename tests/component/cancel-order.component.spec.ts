@@ -26,12 +26,17 @@ import { CustomerRepository } from '../../src/repositories/customer.repository';
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { CancelOrderService } from '../../src/services/cancel-order.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(240_000);
 
 const EXISTING_CUSTOMER_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+const OTHER_CUSTOMER_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+const UNKNOWN_ORDER_ID = '99999999-9999-4999-8999-999999999999';
 
-async function waitFor(assertion: () => void, timeoutMs = 20_000): Promise<void> {
+// 60 s: under a full parallel run the observer consumer can take a while to join its group.
+async function waitFor(assertion: () => void, timeoutMs = 60_000): Promise<void> {
   const start = Date.now();
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -58,6 +63,8 @@ describe('Cancel Order — full write flow (component)', () => {
   let observerConsumer: Consumer;
   const observedMessages: Array<{ aggregateId: string }> = [];
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     postgresContainer = await new PostgreSqlContainer('postgres:16-alpine').start();
     kafkaContainer = await new KafkaContainer('confluentinc/cp-kafka:7.6.1').start();
@@ -68,6 +75,7 @@ describe('Cancel Order — full write flow (component)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -139,8 +147,8 @@ describe('Cancel Order — full write flow (component)', () => {
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
       .send({
-        customerId: EXISTING_CUSTOMER_ID,
         items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }],
       });
     return response.body.orderId;
@@ -149,7 +157,9 @@ describe('Cancel Order — full write flow (component)', () => {
   it('should update the order status to CANCELLED and emit OrderCancelled to Kafka', async () => {
     const orderId = await placeOrder();
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/cancel`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/cancel`)
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID));
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ orderId, status: 'CANCELLED' });
@@ -165,7 +175,9 @@ describe('Cancel Order — full write flow (component)', () => {
 
   it('should return 409 without touching Kafka when the order is already cancelled', async () => {
     const orderId = await placeOrder();
-    await request(app.getHttpServer()).post(`/orders/${orderId}/cancel`);
+    await request(app.getHttpServer())
+      .post(`/orders/${orderId}/cancel`)
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID));
 
     // Wait for the first cancellation's message to actually arrive before asserting
     // that the second (rejected) attempt doesn't produce a new one.
@@ -173,7 +185,9 @@ describe('Cancel Order — full write flow (component)', () => {
       expect(observedMessages.filter((m) => m.aggregateId === orderId)).toHaveLength(1);
     });
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/cancel`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/cancel`)
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID));
 
     expect(response.status).toBe(409);
     expect(observedMessages.filter((m) => m.aggregateId === orderId)).toHaveLength(1);
@@ -185,7 +199,9 @@ describe('Cancel Order — full write flow (component)', () => {
     const originalSend = producer.send.bind(producer);
     producer.send = jest.fn().mockRejectedValueOnce(new Error('simulated broker outage'));
 
-    const response = await request(app.getHttpServer()).post(`/orders/${orderId}/cancel`);
+    const response = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/cancel`)
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID));
 
     expect(response.status).toBe(200);
 
@@ -199,5 +215,47 @@ describe('Cancel Order — full write flow (component)', () => {
     expect(deadLetterRows.length).toBeGreaterThanOrEqual(1);
 
     producer.send = originalSend;
+  });
+
+  describe('ownership (US-11)', () => {
+    function eventsFor(orderId: string): number {
+      return observedMessages.filter((m) => m.aggregateId === orderId).length;
+    }
+
+    it("should answer another customer's order like an unknown id, leave it PENDING and publish nothing", async () => {
+      const orderId = await placeOrder();
+      const intruder = await auth.customerHeaders(OTHER_CUSTOMER_ID);
+
+      const notMine = await request(app.getHttpServer())
+        .post(`/orders/${orderId}/cancel`)
+        .set(intruder);
+      const unknown = await request(app.getHttpServer())
+        .post(`/orders/${UNKNOWN_ORDER_ID}/cancel`)
+        .set(intruder);
+
+      expect(notMine.status).toBe(404);
+      expect(notMine.text).toBe(unknown.text);
+      const rows = await dataSource.query('SELECT status FROM orders WHERE id = $1', [orderId]);
+      expect(rows[0].status).toBe('PENDING');
+
+      // The owner's cancellation then publishes exactly one event: the 404 published none.
+      const owned = await request(app.getHttpServer())
+        .post(`/orders/${orderId}/cancel`)
+        .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID));
+      expect(owned.status).toBe(200);
+      await waitFor(() => expect(eventsFor(orderId)).toBe(1));
+    });
+
+    it("should let an admin cancel any customer's order and publish OrderCancelled", async () => {
+      const orderId = await placeOrder();
+
+      const response = await request(app.getHttpServer())
+        .post(`/orders/${orderId}/cancel`)
+        .set(await auth.adminHeaders());
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ orderId, status: 'CANCELLED' });
+      await waitFor(() => expect(eventsFor(orderId)).toBe(1));
+    });
   });
 });

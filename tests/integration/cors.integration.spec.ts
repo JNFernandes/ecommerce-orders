@@ -1,15 +1,15 @@
 import { INestApplication } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { CommandBus, CqrsModule } from '@nestjs/cqrs';
-import { GraphQLModule } from '@nestjs/graphql';
-import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import configuration from '../../src/config/configuration';
 import { configureApp } from '../../src/app.setup';
-import { buildGraphqlOptions } from '../../src/graphql/graphql.config';
+import { graphqlModule } from '../../src/graphql/graphql.config';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { OrdersResolver } from '../../src/controllers/orders.resolver';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 const ALLOWED_ORIGIN = 'https://shop.example.com';
 const OTHER_ALLOWED_ORIGIN = 'http://localhost:5173';
@@ -32,12 +32,9 @@ async function buildApp(allowedOrigins: string | undefined): Promise<INestApplic
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration], ignoreEnvFile: true }),
+        AuthModule,
         CqrsModule.forRoot(),
-        GraphQLModule.forRootAsync<ApolloDriverConfig>({
-          driver: ApolloDriver,
-          inject: [ConfigService],
-          useFactory: buildGraphqlOptions,
-        }),
+        graphqlModule(),
       ],
       controllers: [OrdersController],
       providers: [OrdersResolver],
@@ -64,14 +61,18 @@ function corsHeaderNames(headers: Record<string, unknown>): string[] {
   return Object.keys(headers).filter((name) => name.toLowerCase().startsWith('access-control-'));
 }
 
+/** Fake Identity for the whole file; REST calls send a token allowed on every route. */
+const auth = withTestIdentity();
+
 function restRequest(app: INestApplication, origin?: string): request.Test {
-  const req = request(app.getHttpServer()).post(`/orders/${ORDER_ID}/cancel`);
+  const req = request(app.getHttpServer()).post(`/orders/${ORDER_ID}/cancel`).set(auth.headers);
   return origin === undefined ? req : req.set('Origin', origin);
 }
 
 function graphqlRequest(app: INestApplication, origin: string): request.Test {
   return request(app.getHttpServer())
     .post('/graphql')
+    .set(auth.headers)
     .set('Origin', origin)
     .set('Content-Type', 'application/json')
     .send({ query: '{ __typename }' });

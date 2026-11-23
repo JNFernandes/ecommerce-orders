@@ -34,6 +34,8 @@ import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/cons
 import { PlaceOrderService } from '../../src/services/place-order.service';
 import { CreateCustomerService } from '../../src/services/create-customer.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(300_000);
 
@@ -59,6 +61,8 @@ describe('Customer registration — identity.user-registered → customers (comp
   let app: INestApplication;
   let dataSource: DataSource;
   let testProducer: Producer;
+
+  const auth = withTestIdentity();
 
   beforeAll(async () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -90,6 +94,7 @@ describe('Customer registration — identity.user-registered → customers (comp
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -183,7 +188,8 @@ describe('Customer registration — identity.user-registered → customers (comp
 
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .send({ customerId, items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }] });
+      .set(await auth.customerHeaders(customerId))
+      .send({ items: [{ productId: 'prod-001', quantity: 1, unitPrice: 10 }] });
     expect(response.status).toBe(201);
   });
 

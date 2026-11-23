@@ -54,6 +54,8 @@ import { CreateCustomerService } from '../../src/services/create-customer.servic
 import { OrderProjectionService } from '../../src/read-model/order-projection.service';
 import { OrdersController } from '../../src/controllers/orders.controller';
 import { DeadLetterRetryWorker } from '../../src/infra/dead-letter/dead-letter-retry.worker';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(240_000);
 
@@ -159,6 +161,8 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
   const savedEnv: Record<string, string | undefined> = {};
   let startupMs = 0;
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     postgres = await new PostgreSqlContainer('postgres:16-alpine').start();
     kafka = await new KafkaContainer('confluentinc/cp-kafka:7.6.1').start();
@@ -194,6 +198,7 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgres.getHost(),
@@ -277,7 +282,8 @@ describe('Starting and serving while Kafka is unavailable (component)', () => {
     const started = Date.now();
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .send({ customerId: CUSTOMER_ID, items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
+      .set(await auth.customerHeaders(CUSTOMER_ID))
+      .send({ items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
     const elapsedMs = Date.now() - started;
 
     expect(response.status).toBe(201);

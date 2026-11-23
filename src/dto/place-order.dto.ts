@@ -8,7 +8,6 @@ import {
   IsNumber,
   IsPositive,
   IsString,
-  IsUUID,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -31,16 +30,12 @@ export class PlaceOrderItemDto {
   unitPrice!: number;
 }
 
-/** Request body for POST /orders. */
+/**
+ * Request body for POST /orders. Holds only the items: the customer is the caller, taken from the
+ * access token's `customerId` (US-11). A body with any other property, `customerId` included, is
+ * rejected with 400 by the global `ValidationPipe` (`forbidNonWhitelisted`).
+ */
 export class PlaceOrderDto {
-  @ApiProperty({
-    example: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
-    description:
-      'Identifier of the customer placing the order; must reference an existing customer',
-  })
-  @IsUUID()
-  customerId!: string;
-
   @ApiProperty({ type: [PlaceOrderItemDto], description: 'One or more items in the order' })
   @IsArray()
   @ArrayMinSize(1)

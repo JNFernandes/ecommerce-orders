@@ -50,6 +50,8 @@ import { OrderProjectionService } from '../../src/read-model/order-projection.se
 import { PAYMENT_PROCESSED_TOPIC } from '../../src/infra/kafka/payment-message.parser';
 import { STOCK_RESERVED_TOPIC } from '../../src/infra/kafka/stock-message.parser';
 import { StockOutcome } from '../../src/domain/stock-outcome.enum';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(240_000);
 
@@ -97,6 +99,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
   const observed: ObservedEvent[] = [];
   const savedEnv: Record<string, string | undefined> = {};
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     for (const [key, value] of Object.entries(ENV)) {
       savedEnv[key] = process.env[key];
@@ -130,6 +134,7 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
     moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgres.getHost(),
@@ -217,7 +222,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .send({ customerId: CUSTOMER_ID, items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
+      .set(await auth.customerHeaders(CUSTOMER_ID))
+      .send({ items: [{ productId: 'p-1', quantity: 1, unitPrice: 10 }] });
     expect(response.status).toBe(201);
     const orderId = (response.body as { orderId: string }).orderId;
 
@@ -243,7 +249,8 @@ describe('Dead-letter retry (component, Kafka + PostgreSQL)', () => {
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
-      .send({ customerId: CUSTOMER_ID, items: [{ productId: 'p-2', quantity: 2, unitPrice: 5 }] });
+      .set(await auth.customerHeaders(CUSTOMER_ID))
+      .send({ items: [{ productId: 'p-2', quantity: 2, unitPrice: 5 }] });
     expect(response.status).toBe(201);
     return (response.body as { orderId: string }).orderId;
   }

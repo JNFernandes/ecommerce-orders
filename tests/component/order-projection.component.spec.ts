@@ -37,6 +37,8 @@ import { OrdersController } from '../../src/controllers/orders.controller';
 import { ReadModelModule } from '../../src/read-model/read-model.module';
 import { OrderProjectionConsumer } from '../../src/infra/kafka/order-projection.consumer';
 import { ConsumedMessageDeadLetterRepository } from '../../src/repositories/consumed-message-dead-letter.repository';
+import { AuthModule } from '../../src/infra/auth/auth.module';
+import { withTestIdentity } from '../support/auth-testing';
 
 jest.setTimeout(300_000);
 
@@ -78,6 +80,8 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
   let mongo: Connection;
   let testProducer: Producer;
 
+  const auth = withTestIdentity();
+
   beforeAll(async () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
@@ -113,6 +117,7 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+        AuthModule,
         TypeOrmModule.forRoot({
           type: 'postgres',
           host: postgresContainer.getHost(),
@@ -194,8 +199,8 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
   async function placeOrder(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .set(await auth.customerHeaders(EXISTING_CUSTOMER_ID))
       .send({
-        customerId: EXISTING_CUSTOMER_ID,
         items: [
           { productId: 'p-1', quantity: 3, unitPrice: 19.99 },
           { productId: 'p-2', quantity: 1, unitPrice: 5 },
@@ -218,7 +223,9 @@ describe('Order read model projection — REST → Postgres → Kafka → MongoD
     expect(pending.placedAt).toBeInstanceOf(Date);
     expect(pending.confirmedAt).toBeNull();
 
-    const confirm = await request(app.getHttpServer()).post(`/orders/${orderId}/confirm`);
+    const confirm = await request(app.getHttpServer())
+      .post(`/orders/${orderId}/confirm`)
+      .set(await auth.adminHeaders());
     expect(confirm.status).toBe(200);
 
     const confirmed = await viewWithStatus(orderId, 'CONFIRMED');

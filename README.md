@@ -126,14 +126,54 @@ Principle VII): one customer per event, with the event's `customerId` as its id 
 
 | Method | Path | Description | Responses |
 |---|---|---|---|
-| `POST` | `/orders` | Place an order (`customerId`, `items[]`) | `201` `{ orderId }`, `400` invalid input, `404` unknown customer |
-| `POST` | `/orders/:orderId/cancel` | Cancel a `PENDING` order | `200`, `404` not found, `409` not `PENDING` |
-| `POST` | `/orders/:orderId/confirm` | Confirm a `PENDING` order manually (payment success does this automatically) | `200`, `404` not found, `409` not `PENDING` |
+| `POST` | `/orders` | Place an order for the caller (`items[]`; the customer is the token's `customerId`). Role `CUSTOMER` | `201` `{ orderId }`, `400` invalid input (a `customerId` in the body included), `404` unknown customer |
+| `POST` | `/orders/:orderId/cancel` | Cancel a `PENDING` order. `CUSTOMER` (own orders) or `ADMIN` (any order) | `200`, `404` not found (or another customer's order), `409` not `PENDING` |
+| `POST` | `/orders/:orderId/confirm` | Confirm a `PENDING` order manually (payment success does this automatically). Role `ADMIN` | `200`, `404` not found, `409` not `PENDING` |
+
+Every route needs a token; see [Authentication](#authentication).
+
+Example (`$CUSTOMER_TOKEN` from an Identity login, see below):
+
+```bash
+curl -s localhost:3000/orders -H "Authorization: Bearer $CUSTOMER_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"items":[{"productId":"prod-001","quantity":2,"unitPrice":19.99}]}'
+```
 
 Swagger UI is served at `http://localhost:3000/api` while the app is running. Story-level details
 are in [`docs/us-01-place-order.md`](docs/us-01-place-order.md),
 [`docs/us-02-cancel-order.md`](docs/us-02-cancel-order.md) and
 [`docs/us-03-confirm-order.md`](docs/us-03-confirm-order.md).
+
+## Authentication
+
+Every REST route and every GraphQL operation (introspection included) needs an access token from
+[ecommerce-identity](../ecommerce-identity): register and log in there, then send
+`Authorization: Bearer <token>`. Orders verifies the token itself with Identity's public keys
+(`IDENTITY_JWKS_URL`), fetched on the first request and cached; it never calls Identity per
+request and starts even when Identity is down. Details: [ADR 0008](docs/adr/0008-identity-token-verification.md).
+
+| Route | Who may call it |
+|---|---|
+| `POST /orders` | `CUSTOMER` (a token with a `customerId`); the order is placed for that customer |
+| `POST /orders/:orderId/cancel` | `CUSTOMER` for their own orders, `ADMIN` for any order |
+| `POST /orders/:orderId/confirm` | `ADMIN` |
+| GraphQL `orders`, `order` | `CUSTOMER` or `ADMIN` |
+| Swagger (`/api`, `/api-json`) | anyone |
+
+`CUSTOMER` counts only when the token carries a `customerId`. Answers:
+
+| Status | GraphQL code | Meaning |
+|---|---|---|
+| `401` (with `WWW-Authenticate: Bearer`) | `UNAUTHENTICATED` | No token, or a token Orders does not accept (bad signature, expired, wrong issuer or audience, …). Always the same body; it never says why |
+| `403` | `FORBIDDEN` | Valid token without a role allowed on the route |
+| `404` | — | Unknown order, **or another customer's order** (the two cannot be told apart) |
+| `503` | `SERVICE_UNAVAILABLE` | Identity's keys could not be loaded yet; retry later |
+
+GraphQL errors keep HTTP status `200`; an auth failure there has no `data`. **GraphQL results are
+not scoped to the caller yet**: any `CUSTOMER` can read every order until US-12.
+
+In Swagger UI, use **Authorize** and paste the token. Tokens are never logged.
 
 ## GraphQL (read path)
 
@@ -207,6 +247,7 @@ From the command line:
 
 ```bash
 curl -s localhost:3000/graphql -H 'content-type: application/json' \
+  -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -d '{"query":"{ orders(limit: 5) { totalCount items { orderId status totalAmount } } }"}'
 ```
 
@@ -265,6 +306,10 @@ started. The `ecommerce-infra` compose file (`--profile apps`) runs the image th
 | Variable | Default (`.env.example`) | Description |
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
+| `IDENTITY_JWKS_URL` | `http://localhost:3001/.well-known/jwks.json` | Identity's public key set, used to verify access tokens (fetched lazily, cached 5 min) |
+| `JWT_ISSUER` | `http://localhost:3001` (no default in code) | Required. Expected `iss` of access tokens; the service does not start without it |
+| `JWT_AUDIENCE` | `ecommerce` (no default in code) | Required. Expected `aud` of access tokens; the service does not start without it |
+| `JWT_CLOCK_TOLERANCE_SECONDS` | `5` | Clock skew allowed on `exp`, `iat` and `nbf` |
 | `CORS_ALLOWED_ORIGINS` | _(empty)_ | Comma-separated browser origins allowed to call the REST API and `/graphql` (see [CORS](#cors)). Empty or unset: no cross-origin access |
 | `DB_HOST` | `localhost` | PostgreSQL host |
 | `DB_PORT` | `5432` | PostgreSQL port |
