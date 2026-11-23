@@ -1,6 +1,9 @@
 import { generateKeyPair } from 'jose';
 import { AccessTokenError } from '../../../../src/infra/auth/access-token.error';
-import { AccessTokenVerifier } from '../../../../src/infra/auth/access-token.verifier';
+import {
+  AccessTokenVerifier,
+  AccessTokenVerifierTimings,
+} from '../../../../src/infra/auth/access-token.verifier';
 import { Role } from '../../../../src/infra/auth/role.enum';
 import { TestIdentity } from '../../../support/test-identity';
 
@@ -187,5 +190,159 @@ describe('AccessTokenVerifier', () => {
     } finally {
       identity.setAvailable(true);
     }
+  });
+});
+
+/** Resolves after `ms` milliseconds (real timers: jose's key set uses `Date.now()` and `fetch`). */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+describe('AccessTokenVerifier key set (US5: lazy, single-flight, cooldown, last good)', () => {
+  let identity: TestIdentity;
+
+  beforeEach(async () => {
+    identity = await TestIdentity.start();
+  });
+
+  afterEach(async () => {
+    await identity.stop();
+  });
+
+  function buildVerifier(timings?: AccessTokenVerifierTimings): AccessTokenVerifier {
+    return new AccessTokenVerifier(
+      {
+        jwksUrl: identity.jwksUrl,
+        issuer: identity.issuer,
+        audience: identity.audience,
+        clockToleranceSeconds: 5,
+      },
+      timings,
+    );
+  }
+
+  /** A token signed with the current key but naming a `kid` Identity never published. */
+  function unknownKidToken(): Promise<string> {
+    return identity.sign({ roles: ['CUSTOMER'] }, { header: { kid: `unknown-${Math.random()}` } });
+  }
+
+  it('makes no request until the first verification', () => {
+    buildVerifier();
+    expect(identity.requestCount).toBe(0);
+  });
+
+  it('shares one fetch between 20 concurrent first verifications', async () => {
+    const verifier = buildVerifier();
+    const token = await identity.customerToken(CUSTOMER_ID);
+
+    await Promise.all(Array.from({ length: 20 }, () => verifier.verify(token)));
+
+    expect(identity.requestCount).toBe(1);
+  });
+
+  it('fetches once for 100 sequential valid verifications', async () => {
+    const verifier = buildVerifier();
+    const token = await identity.customerToken(CUSTOMER_ID);
+
+    for (let i = 0; i < 100; i += 1) {
+      await verifier.verify(token);
+    }
+
+    expect(identity.requestCount).toBe(1);
+  });
+
+  it('fails with KEYS_UNAVAILABLE while nothing is loaded, then recovers without a new verifier', async () => {
+    const verifier = buildVerifier();
+    const token = await identity.customerToken(CUSTOMER_ID);
+    identity.setAvailable(false);
+
+    const error = await rejection(verifier, token);
+    expect(error.kind).toBe('KEYS_UNAVAILABLE');
+    expect(error.category).toBe('fetch');
+    expect(error.message).not.toContain(token.slice(0, 20));
+
+    identity.setAvailable(true);
+    await expect(verifier.verify(token)).resolves.toMatchObject({ customerId: CUSTOMER_ID });
+  });
+
+  it('treats a key set with no usable RS256 key as unavailable when nothing is loaded', async () => {
+    const verifier = buildVerifier();
+    const token = await identity.customerToken(CUSTOMER_ID);
+    identity.removeKey(identity.currentKid);
+
+    const error = await rejection(verifier, token);
+    expect(error.kind).toBe('KEYS_UNAVAILABLE');
+  });
+
+  it('accepts a token signed with a rotated key once the cooldown has passed', async () => {
+    const verifier = buildVerifier({ cooldownMs: 100 });
+    await verifier.verify(await identity.customerToken(CUSTOMER_ID));
+
+    await identity.rotate();
+    await delay(150);
+    const rotated = await identity.customerToken(CUSTOMER_ID);
+
+    await expect(verifier.verify(rotated)).resolves.toMatchObject({ customerId: CUSTOMER_ID });
+    expect(identity.requestCount).toBe(2);
+  });
+
+  it('refetches once for a burst of 50 unknown kids after the cooldown', async () => {
+    const verifier = buildVerifier({ cooldownMs: 1_000 });
+    await verifier.verify(await identity.customerToken(CUSTOMER_ID));
+    // Signed up front so the burst fits well inside the next cooldown window.
+    const tokens = await Promise.all(Array.from({ length: 50 }, () => unknownKidToken()));
+    await delay(1_100);
+    const before = identity.requestCount;
+
+    await Promise.all(tokens.map((token) => expectInvalid(verifier, token, 'unknown-kid')));
+
+    expect(identity.requestCount - before).toBe(1);
+  });
+
+  it('does not refetch for an unknown kid right after a load (default 60 s cooldown)', async () => {
+    const verifier = buildVerifier();
+    await verifier.verify(await identity.customerToken(CUSTOMER_ID));
+
+    for (let i = 0; i < 50; i += 1) {
+      await expectInvalid(verifier, await unknownKidToken(), 'unknown-kid');
+    }
+
+    expect(identity.requestCount).toBe(1);
+  });
+
+  it('keeps accepting a known kid when the refresh of a stale set fails', async () => {
+    const verifier = buildVerifier({ cooldownMs: 50, cacheMaxAgeMs: 100 });
+    const token = await identity.customerToken(CUSTOMER_ID);
+    await verifier.verify(token);
+
+    await delay(150);
+    identity.setAvailable(false);
+
+    await expect(verifier.verify(token)).resolves.toMatchObject({ customerId: CUSTOMER_ID });
+    expect(identity.requestCount).toBe(2);
+  });
+
+  it('keeps the loaded keys when a refresh returns no usable key', async () => {
+    const verifier = buildVerifier({ cooldownMs: 50, cacheMaxAgeMs: 100 });
+    const token = await identity.customerToken(CUSTOMER_ID);
+    await verifier.verify(token);
+
+    identity.removeKey(identity.currentKid);
+    await delay(150);
+
+    await expect(verifier.verify(token)).resolves.toMatchObject({ customerId: CUSTOMER_ID });
+  });
+
+  it('rejects a token whose key Identity withdrew, after the next refresh', async () => {
+    const verifier = buildVerifier({ cooldownMs: 50, cacheMaxAgeMs: 100 });
+    const oldToken = await identity.customerToken(CUSTOMER_ID);
+    await verifier.verify(oldToken);
+
+    const oldKid = identity.currentKid;
+    await identity.rotate();
+    identity.removeKey(oldKid);
+    await delay(150);
+
+    await expectInvalid(verifier, oldToken, 'unknown-kid');
   });
 });

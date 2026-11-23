@@ -1,8 +1,12 @@
 import {
+  createLocalJWKSet,
   createRemoteJWKSet,
   decodeProtectedHeader,
   errors,
   FlattenedJWSInput,
+  JSONWebKeySet,
+  JWKSCacheInput,
+  jwksCache,
   JWSHeaderParameters,
   JWTPayload,
   jwtVerify,
@@ -31,41 +35,102 @@ const COOLDOWN_MS = 60_000;
 /** Age after which a loaded key set is refreshed, in ms (research R3). */
 const CACHE_MAX_AGE_MS = 300_000;
 
+/**
+ * Timing overrides for tests only, so they can exercise the cooldown and the refresh without
+ * waiting minutes. Production code (`AuthModule`) passes none and gets the defaults.
+ */
+export interface AccessTokenVerifierTimings {
+  /** Minimum time between two key set fetches, in ms. Default 60 000. */
+  readonly cooldownMs?: number;
+  /** Age after which a loaded key set is refreshed, in ms. Default 300 000. */
+  readonly cacheMaxAgeMs?: number;
+}
+
 /** Wraps any failure to obtain the key set, so it is told apart from a bad token. */
 class KeySetUnavailable extends Error {}
 
 /** Resolves the key for a token header, as jose's `jwtVerify` expects. */
 type KeyResolver = (header: JWSHeaderParameters, input: FlattenedJWSInput) => Promise<KeyLike>;
 
+/** Whether the key set holds at least one key Orders can verify with (RSA, RS256, signing). */
+function hasUsableKey(jwks: JSONWebKeySet): boolean {
+  return jwks.keys.some(
+    (key) =>
+      key.kty === 'RSA' &&
+      (key.alg === undefined || key.alg === 'RS256') &&
+      (key.use === undefined || key.use === 'sig'),
+  );
+}
+
+/** Whether jose rejected the token's `kid` (as opposed to failing to get the key set). */
+function isKeyMismatch(error: unknown): boolean {
+  return (
+    error instanceof errors.JWKSNoMatchingKey || error instanceof errors.JWKSMultipleMatchingKeys
+  );
+}
+
 /**
  * Verifies Identity access tokens locally (research R2–R7): RS256 only, a `kid` that is in
  * Identity's key set, the configured issuer and audience, `exp`/`nbf`/`iat` within the tolerance,
  * and the claim shapes Orders relies on. The key set is fetched lazily on the first verification
  * (never at startup), shared by concurrent callers, refreshed after 5 minutes and refetched at
- * most once a minute for an unknown `kid`.
+ * most once a minute for an unknown `kid`. A failed fetch or refresh, a non-JSON answer or a set
+ * with no usable RS256 key never discards the last good key set (research R4); only with no key
+ * set ever loaded does verification fail with `KEYS_UNAVAILABLE`.
  */
 export class AccessTokenVerifier {
   private readonly keys: KeyResolver;
 
-  /** Builds the verifier. Makes no network call. */
-  constructor(private readonly config: AccessTokenVerifierConfig) {
+  /** Filled by jose with the key set of the last successful fetch (and its time). */
+  private readonly fetched: JWKSCacheInput = {};
+
+  /** The last fetched key set that held a usable key: the fallback when a refresh fails. */
+  private lastGood: JSONWebKeySet | undefined;
+
+  /**
+   * Builds the verifier. Makes no network call.
+   *
+   * @param timings Tests only; production passes none (see {@link AccessTokenVerifierTimings}).
+   */
+  constructor(
+    private readonly config: AccessTokenVerifierConfig,
+    timings: AccessTokenVerifierTimings = {},
+  ) {
     const remote = createRemoteJWKSet(new URL(config.jwksUrl), {
-      cooldownDuration: COOLDOWN_MS,
-      cacheMaxAge: CACHE_MAX_AGE_MS,
+      cooldownDuration: timings.cooldownMs ?? COOLDOWN_MS,
+      cacheMaxAge: timings.cacheMaxAgeMs ?? CACHE_MAX_AGE_MS,
+      [jwksCache]: this.fetched,
     });
     this.keys = async (header, input): Promise<KeyLike> => {
       try {
-        return await remote(header, input);
+        const key = await remote(header, input);
+        this.rememberFetched();
+        return key;
       } catch (error) {
-        if (
-          error instanceof errors.JWKSNoMatchingKey ||
-          error instanceof errors.JWKSMultipleMatchingKeys
-        ) {
+        const fetchedUsable = this.rememberFetched();
+        if (isKeyMismatch(error) && fetchedUsable) {
           throw error;
         }
-        throw new KeySetUnavailable();
+        // The fetch failed or returned nothing usable: fall back to the last good set, if any.
+        if (this.lastGood === undefined) {
+          throw new KeySetUnavailable();
+        }
+        return createLocalJWKSet(this.lastGood)(header, input);
       }
     };
+  }
+
+  /**
+   * Keeps the key set jose last fetched as the fallback when it holds a usable key. Returns
+   * whether it does (`false` also when nothing was fetched yet).
+   */
+  private rememberFetched(): boolean {
+    const jwks = 'jwks' in this.fetched ? this.fetched.jwks : undefined;
+    if (jwks === undefined || !hasUsableKey(jwks)) {
+      return false;
+    }
+    this.lastGood = jwks;
+    return true;
   }
 
   /**
@@ -151,10 +216,7 @@ function invalidCategory(error: unknown): AccessTokenErrorCategory {
   if (error instanceof errors.JWSSignatureVerificationFailed) {
     return 'signature';
   }
-  if (
-    error instanceof errors.JWKSNoMatchingKey ||
-    error instanceof errors.JWKSMultipleMatchingKeys
-  ) {
+  if (isKeyMismatch(error)) {
     return 'unknown-kid';
   }
   return 'malformed';
